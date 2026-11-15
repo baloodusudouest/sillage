@@ -652,38 +652,27 @@ def test_estimation_lue_dans_le_tag():
     assert calcul.estimation("Date estimée/1975 ±3", "") is None
 
 
-def test_date_de_fin_saisie_dans_sillage(monde, c):
-    r = c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "2019-06-15"}).json()
-    assert r["personne"]["fin"] == "2019-06-15" and r["personne"]["fin_source"] == "sillage" and r["personne"]["decede"]
-    assert r["ecartees"]["apres_fin"] == 1                                          # la photo du 16 juin
-    assert etapes(r)[-1]["fin"] == "2019-06-15"
-    camille = next(p for p in c.get("/api/personnes").json()["personnes"] if p["id"] == CAMILLE)
-    assert camille["age"] is None and camille["fin"] == "2019-06-15" and camille["decede"]
-    assert c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "1980-01-01"}).status_code == 422   # avant la naissance
-    assert c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "2999-01-01"}).status_code == 422   # demain
-    assert c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "15/06/2019"}).status_code == 422
-    assert c.put(f"/api/personne/{ident('personne')}/fin", json={"date": "2019-06-15"}).status_code == 404
-    r = c.put(f"/api/personne/{CAMILLE}/fin", json={"date": ""}).json()
-    assert r["personne"]["fin"] is None and r["ecartees"]["apres_fin"] == 0
-
-
 def test_date_de_fin_venue_de_carnet(c):
     avec_carnet((200, {"personnes": [
         {"carnet_id": "f1", "nom": "Camille R.", "immich_id": CAMILLE, "groupes": [], "proche": True, "decede": True, "deces": "2019-06-15"},
         {"carnet_id": "f2", "nom": "Hugo M.", "immich_id": HUGO, "groupes": [], "proche": True, "decede": True, "deces": ""}]}))
     r = c.get(f"/api/chemin/{CAMILLE}").json()
     assert (r["personne"]["fin"], r["personne"]["fin_source"]) == ("2019-06-15", "carnet")
-    assert c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "2019-01-01"}).status_code == 409   # carnet fait foi
+    assert r["ecartees"]["apres_fin"] == 1 and etapes(r)[-1]["fin"] == "2019-06-15"   # la photo du 16 juin sort du chemin
+    camille = next(p for p in c.get("/api/personnes").json()["personnes"] if p["id"] == CAMILLE)
+    assert camille["age"] is None and camille["fin"] == "2019-06-15" and camille["decede"]
     hugo = c.get(f"/api/chemin/{HUGO}").json()["personne"]
-    assert hugo["decede"] and hugo["fin"] is None                                   # décédé sans date : à saisir
-    assert c.put(f"/api/personne/{HUGO}/fin", json={"date": "2002-05-01"}).json()["personne"]["fin_source"] == "sillage"
+    assert hugo["decede"] and hugo["fin"] is None                                   # décédé sans date : rien à saisir ici
+    # 0.14.1 : Sillage ne saisit plus de date de décès (carnet ou Treemich seulement)
+    assert c.put(f"/api/personne/{HUGO}/fin", json={"date": "2002-05-01"}).status_code in (404, 405)
 
 
 def test_le_recit_dit_vers_pour_un_scan_estime(monde, c):
     _, faux = monde
     avec_tags(faux, non_datee="Lots/Non datée")
     faux.albums[ident("scan1")] = "Kermesse de l'école"
-    c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "2020-01-01"})
+    avec_carnet((200, {"personnes": [{"carnet_id": "f1", "nom": "Camille R.", "immich_id": CAMILLE, "groupes": [],
+                                      "proche": True, "decede": True, "deces": "2020-01-01"}]}))
     texte = c.get(f"/api/recit/{CAMILLE}").json()["texte"]
     assert "Vers 1992, vers 5 ans : Kermesse de l'école." in texte
     assert "Naissance le 14 mars 1987. Décès le 1er janvier 2020." in texte

@@ -1,12 +1,12 @@
 """Sillage : le chemin de vie d'une personne, lu dans Immich. Lecture seule.
 
 Routes : /health (publique), /api/session, /api/connexion, /api/deconnexion, /api/personnes,
-/api/chemin/{personne} (et /marque), /api/personne/{personne}/fin, /api/recit/{personne}, /api/portrait/{personne},
+/api/chemin/{personne} (et /marque), /api/recit/{personne}, /api/portrait/{personne},
 /api/vignette/{photo}, /api/services, puis l'interface.
 
 0.14 : les scans datés par Millésime (tag « Date estimée/AAAA ±N ») entrent dans le chemin, dits « vers 1975 » ;
-ceux qui attendent une date (SILLAGE_TAG_NON_DATEE) restent à part, comptés. La date de fin d'une personne décédée
-vient de carnet, sinon elle se saisit dans Sillage.
+ceux qui attendent une date (SILLAGE_TAG_NON_DATEE) restent à part, comptés. La date de décès d'une personne
+vient de carnet seulement (qui la tient de Treemich, d'iCloud ou de sa fiche) : Sillage ne la saisit pas (0.14.1).
 
 0.13 : la frise d'une invitation est préparée dès que Home Assistant la pose, gardée dans la base, et refaite
 chaque nuit (SILLAGE_HEURE_FRISES, 2 h par défaut) avec les photos ajoutées : l'invité ne fait jamais attendre Immich.
@@ -169,31 +169,26 @@ def _personnes(frais: bool = False) -> dict[str, dict]:
     if garde_ and not frais and time.monotonic() - garde_[0] < MEMOIRE:
         return garde_[1]
     fiches, erreur = _de_carnet()
-    saisies = ETAT["base"].reglage("fins", {})
     liste = {}
     for p in ETAT["immich"].personnes():
         fiche = fiches.get(p["id"])
         if fiche:
             liste[p["id"]] = {**p, "name": fiche.get("nom") or p.get("name") or "", "carnet": True,
                               "proche": bool(fiche.get("proche")), "decede": bool(fiche.get("decede")),
-                              **_fin(p["id"], fiche, saisies)}
+                              **_fin(fiche)}
         elif (p.get("name") or "").strip() and not p.get("isHidden"):
-            liste[p["id"]] = {**p, "carnet": False, **_fin(p["id"], None, saisies)}
+            liste[p["id"]] = {**p, "carnet": False}
     ETAT["personnes"] = (time.monotonic(), liste)
     ETAT["carnet"] = {"regle": bool(ETAT["cfg"].carnet_jeton), "erreur": erreur, "fiches": len(fiches)}
     ETAT["derniere_lecture"] = time.time()
     return liste
 
 
-def _fin(personne: str, fiche: dict | None, saisies: dict) -> dict:
-    """0.14 : la date de fin (décès) d'une personne : celle de carnet si la fiche en a une complète,
-    sinon celle saisie dans Sillage. Rien : un dictionnaire vide."""
-    de_carnet = calcul.jour((fiche or {}).get("deces"))
-    if de_carnet:
-        return {"fin": de_carnet.isoformat(), "fin_source": "carnet"}
-    if calcul.jour(saisies.get(personne)):
-        return {"fin": saisies[personne], "fin_source": "sillage"}
-    return {}
+def _fin(fiche: dict) -> dict:
+    """0.14 : la date de décès d'une personne, celle de carnet quand la fiche en a une complète.
+    0.14.1 : plus de saisie dans Sillage ; la date se met dans carnet ou dans Treemich."""
+    de_carnet = calcul.jour(fiche.get("deces"))
+    return {"fin": de_carnet.isoformat(), "fin_source": "carnet"} if de_carnet else {}
 
 
 def _reperes(frais: bool = False) -> tuple[dict[str, tuple[int, int]], set[str]]:
@@ -302,33 +297,6 @@ def marquer(personne: str, corps: dict = Body(...)):
     ETAT["base"].marquer(personne, sorte, [connues[str(i)] for i in (corps.get("effacer") or [])],
                          connues[str(corps["poser"])] if corps.get("poser") else None, valeur)
     # 0.13 : les frises d'invités où paraît cette personne sont refaites avec la correction
-    _oublier([i["jeton"] for i in ETAT["base"].invitations() if any(p["id"] == personne for p in i["personnes"])])
-    return _chemin(personne)
-
-
-@app.put("/api/personne/{personne}/fin")
-def poser_fin(personne: str, corps: dict = Body(...)):
-    """0.14 : la date de fin (décès) saisie dans Sillage, quand carnet n'en donne pas. Vide : retirée.
-    Gardée dans Sillage seulement : rien n'est écrit dans Immich ni dans carnet."""
-    fiche = _personnes().get(personne)
-    if not fiche:
-        raise HTTPException(404, "Personne inconnue de Sillage.")
-    if fiche.get("fin_source") == "carnet":
-        raise HTTPException(409, "La date vient de carnet : change-la dans carnet (ou sur l'iPhone).")
-    texte = str(corps.get("date") or "").strip()
-    saisies = ETAT["base"].reglage("fins", {})
-    if texte:
-        quand = calcul.jour(texte)
-        if not quand or len(texte) != 10:
-            raise HTTPException(422, "Date illisible (AAAA-MM-JJ).")
-        naissance = calcul.jour(fiche.get("birthDate"))
-        if quand > date.today() or (naissance and quand < naissance):
-            raise HTTPException(422, "La date doit tomber entre la naissance et aujourd'hui.")
-        saisies[personne] = quand.isoformat()
-    else:
-        saisies.pop(personne, None)
-    ETAT["base"].poser_reglage("fins", saisies)
-    ETAT["personnes"] = None
     _oublier([i["jeton"] for i in ETAT["base"].invitations() if any(p["id"] == personne for p in i["personnes"])])
     return _chemin(personne)
 

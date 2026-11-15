@@ -1,5 +1,9 @@
 # Journal des versions
 
+## 0.14.1 — 15 novembre 2026
+- **Plus de saisie de date de décès dans Sillage.** La date se met dans carnet ou dans Treemich, nulle part ailleurs : Sillage la lit dans carnet (qui la reçoit de Treemich, d'iCloud ou de sa fiche). Bouton « Ajouter une date de décès » et adresse `PUT /api/personne/{id}/fin` retirés. Une personne décédée d'après carnet mais sans date porte la mention « la mettre dans carnet ou dans Treemich ». Une date saisie avec la 0.14.0 n'est plus lue.
+- Tests : 47 du serveur, 26 d'écran.
+
 ## 0.14.0 — 15 novembre 2026
 - **Les scans datés par Millésime entrent dans le chemin, dits « vers 1975 ».** Sillage lit dans Immich les tags que Millésime pose (`Date estimée/1975 ±3`, début réglable par `SILLAGE_TAG_ESTIMEE`) : les scans d'une même année estimée font une étape, « vers 1975 », avec l'âge « vers 5 ans » et un point en pointillé sur le trait. Ils ne se mêlent pas aux vraies photos du même jour. Vaut aussi pour la page des invités et pour « Raconter » (« Vers 1975, vers 5 ans : … »).
 - **Les scans qui attendent leur date restent hors du chemin**, comptés sous le chemin (« 3 scans pas encore datés ») : réglage `SILLAGE_TAG_NON_DATEE`, le tag complet des scans non datés, le même que dans Millésime. Vide : pas lu, ces scans gardent la date qu'ils ont dans Immich. Un scan estimé qui porte encore ce tag est pris comme estimé.

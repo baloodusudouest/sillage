@@ -328,7 +328,7 @@ def test_060_onglet_chambres_apercu_des_invites(page):
 
 # ------------------------------------------------------------ 0.14 : scans de Millésime, date de fin
 
-def test_014_scans_vers_et_date_de_deces(page):
+def test_014_scans_vers(page):
     from tests.faux_immich import HUGO
     page.goto(page.base + "/#/chemin/" + HUGO)
     if page.locator("#mot-de-passe").count():                                        # les tests de l'invité ont vidé les cookies
@@ -340,14 +340,5 @@ def test_014_scans_vers_et_date_de_deces(page):
     assert scans.count() == 1 and "2 photos" in scans.inner_text()
     assert scans.locator(".point.vers").count() == 1                                  # le point en pointillé
     assert page.get_by_text("1 scan pas encore daté").is_visible()
-    # la date de décès, saisie dans Sillage puis retirée
-    page.get_by_role("button", name="Ajouter une date de décès").click()
-    page.fill("#date-fin", "2010-05-01")
-    page.get_by_role("button", name="Garder").click()
-    page.get_by_text("Décès le 1er mai 2010").wait_for()
-    assert page.get_by_text("photo datée après son décès").count() == 0              # Hugo n'a rien après 2010 dans la démo
+    assert page.get_by_role("button", name="Ajouter une date de décès").count() == 0   # 0.14.1 : pas de saisie dans Sillage
     sans_debordement(page)
-    page.get_by_role("button", name="Changer la date de décès").click()
-    page.get_by_role("button", name="Retirer").click()
-    page.get_by_role("button", name="Ajouter une date de décès").wait_for()
-    assert page.get_by_text("Décès le").count() == 0

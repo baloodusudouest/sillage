@@ -19,8 +19,6 @@
   let ouverte = $state(null)          // clé de l'étape ouverte
   let masquees = $state(false)        // montrer aussi les étapes masquées
   let deCote = $state(false)          // montrer les photos mises de côté
-  let finOuverte = $state(false)      // 0.14 : le champ de la date de fin
-  let finSaisie = $state('')
 
   const visibles = (c) => c.etapes.filter((e) => masquees || !e.masquee)
   const forts = $derived(chemin ? chemin.chapitres.reduce((n, c) => n + visibles(c).filter((e) => e.temps_fort).length, 0) : 0)
@@ -59,13 +57,6 @@
         ouverte = chemin.chapitres.flatMap((c) => c.etapes).find((e) => e.photos.some((p) => restantes.has(p.id)))?.cle ?? null
       }
     } catch (err) { if (err.statut === 401) ondeconnecte?.(); else erreur = err.message }
-  }
-
-  // 0.14 : la date de fin (décès), saisie dans Sillage quand carnet n'en donne pas. Vide : retirée.
-  async function poserFin(valeur) {
-    erreur = ''
-    try { chemin = await api.put(`/api/personne/${id}/fin`, { date: valeur }); finOuverte = false }
-    catch (err) { if (err.statut === 401) ondeconnecte?.(); else erreur = err.message }
   }
 
   // Le trait se dessine à mesure qu'on descend ; les étapes apparaissent en entrant dans l'écran.
@@ -116,20 +107,8 @@
       <p class="mt-1 text-sm text-muted-foreground">
         {chemin.personne.naissance ? 'Naissance le ' + dateLongue(chemin.personne.naissance) + ' · ' : ''}{chemin.personne.fin ? 'Décès le ' + dateLongue(chemin.personne.fin) + ' · ' : ''}{chemin.etapes} étape{chemin.etapes > 1 ? 's' : ''}, {chemin.photos} photo{chemin.photos > 1 ? 's' : ''}
       </p>
-      {#if chemin.personne.fin_source === 'carnet'}
-        <p class="mt-1 text-xs text-muted-foreground">Date de décès venue de carnet.</p>
-      {:else if !finOuverte}
-        <button type="button" class="lien mt-1 text-xs" onclick={() => { finSaisie = chemin.personne.fin || ''; finOuverte = true }}>
-          {chemin.personne.fin ? 'Changer la date de décès' : chemin.personne.decede ? 'Décès sans date : la saisir' : 'Ajouter une date de décès'}
-        </button>
-      {:else}
-        <form class="fin mt-2" onsubmit={(ev) => { ev.preventDefault(); poserFin(finSaisie) }}>
-          <label for="date-fin" class="text-xs text-muted-foreground">Date de décès</label>
-          <input id="date-fin" type="date" bind:value={finSaisie} min={chemin.personne.naissance || undefined} max={new Date().toISOString().slice(0, 10)} required />
-          <Button type="submit" size="sm">Garder</Button>
-          {#if chemin.personne.fin}<Button type="button" size="sm" variant="outline" onclick={() => poserFin('')}>Retirer</Button>{/if}
-          <Button type="button" size="sm" variant="ghost" onclick={() => (finOuverte = false)}>Annuler</Button>
-        </form>
+      {#if chemin.personne.decede && !chemin.personne.fin}
+        <p class="mt-1 text-xs text-muted-foreground">Décédé(e) d'après carnet, sans date : la mettre dans carnet ou dans Treemich.</p>
       {/if}
     </div>
     <div class="flex w-full items-center gap-2 sm:w-auto">
@@ -235,9 +214,6 @@
   .point.fort { background: var(--app); width: 0.95rem; height: 0.95rem; margin-left: -0.475rem; }
   /* 0.14 : un scan daté par estimation : le point en pointillé */
   .point.vers { background: var(--background); border-style: dashed; }
-  .fin { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
-  .fin input { height: 2rem; padding: 0 0.6rem; border: 1px solid var(--border); border-radius: 0.6rem; background: var(--background); color: var(--foreground); color-scheme: dark; }
-  .lien { display: inline-flex; align-items: center; min-height: 2rem; padding: 0; border: 0; background: none; cursor: pointer; color: var(--app); text-decoration: underline; text-underline-offset: 3px; }
   .carte { display: flex; flex-direction: column; width: 100%; max-width: 26rem; overflow: hidden; text-align: left; border: 1px solid var(--border); border-radius: 1.1rem; background: var(--card); transition: border-color 0.2s, transform 0.2s; }
   .carte:hover { border-color: var(--app); transform: translateY(-2px); }
   .carte img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--secondary); }
