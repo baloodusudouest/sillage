@@ -18,5 +18,7 @@ services:
       - SILLAGE_CARNET_URL=http://carnet:8096          # carnet vu depuis la stack
       - SILLAGE_CARNET_JETON=${SILLAGE_CARNET_JETON:-}   # le même jeton que CARNET_JETON_SILLAGE ; vide : personnes d'Immich
       - SILLAGE_MOTS=${SILLAGE_MOTS:-}               # mots des temps forts, séparés par des virgules ; vide : la liste par défaut
+      - SILLAGE_TAG_ESTIMEE=${SILLAGE_TAG_ESTIMEE:-Date estimée}   # 0.14 : début des tags d'estimation de Millésime
+      - SILLAGE_TAG_NON_DATEE=${SILLAGE_TAG_NON_DATEE:-}           # 0.14 : tag complet des scans non datés (celui de Millésime) ; vide : pas lu
     volumes:
       - ${SILLAGE_DATA_DIR}:/data                    # un seul petit fichier (déconnexion)

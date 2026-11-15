@@ -2,8 +2,10 @@
 
 Fichier à lire en premier dans une nouvelle session, et à mettre à jour à chaque fin de session, dans le même commit que le code.
 
-## État (14/11/2026)
+## État (15/11/2026)
 
+- **0.14.0** : scans de Millésime et date de décès. `chemin.estimation` lit « Date estimée/AAAA ±N » ; `calculer(..., estimees, non_datees)` : les estimés font une étape par année (`vers` = marge, `quand` = « vers AAAA », clé `vers-AAAA`, jamais réunie par `regrouper`), les non datés sont comptés (`ecartees.scans_non_dates`), ce qui est après `personne["fin"]` aussi (`apres_fin`). `main._reperes` lit les tags (`Immich.etiquettes`, `Immich.ids_du_tag`, une recherche `tagIds` par tag), gardé dix minutes, relu par « Relire » et par Connexion. `main._fin` : date de carnet (`deces`, carnet 2.24.1) sinon saisie (`PUT /api/personne/{id}/fin`, réglage `fins` de la base). **Jamais essayé contre le vrai Immich** : droit `tag.read` de la clé, nombre de tags d'estimation, temps de lecture.
+- Vérifications de la 0.13 et des versions d'avant faites par l'utilisateur le 15/11/2026 sur la vraie installation (vue des invités dans HA, carnet, vidéos, iframe, noms, photos phares, iPhone) : **tout fonctionne**.
 - **0.13.0** : frises des invités préparées d'avance. `/ha/sejour` lance `_preparer` en fond (fil `_en_fond`) si l'invitation n'a pas de frise ; `_calculer(inv)` fait le travail lent (frise + `_photos_gens`), `Base.garder_frise` la garde (table `frises`, nettoyée avec les invitations), `_chauffer` met les photos phares (`preview`) dans le cache disque. `_invitation` lit la mémoire, puis la base, et ne calcule sur place que si rien n'est prêt. `_chaque_nuit` (tâche du cycle) appelle `_rafraichir_tout` à `SILLAGE_HEURE_FRISES` (2 h). `_oublier(jetons)` refait les frises après une correction ou un changement d'hôtes. **Jamais essayé contre le vrai Immich** : temps de préparation d'une frise à plusieurs, place prise par les vignettes (500 Mo par défaut).
 - **0.11–0.12** : filtre par personne ou « Ensemble » sur la page d'invité, « Voir l'album » (propriétaire et invités), croix de fermeture au même endroit.
 
@@ -23,16 +25,13 @@ Fichier à lire en premier dans une nouvelle session, et à mettre à jour à ch
 
 ## À vérifier sur la vraie installation
 
-- Intersection `personIds` d'Immich : **confirmée** le 13/11/2026 (chemin commun d'un couple qui commence à leur rencontre).
-- L'iframe de la chambre : un tableau de bord ouvert en https (Nabu Casa, Funnel) refusera une page Sillage en http. Ouvrir le tableau de bord en local, ou passer Sillage en https.
-- Les noms : sortent-ils mieux ? Quels dossiers faut-il ajouter à `SILLAGE_DOSSIERS_MUETS` ?
-- La photo phare : si Immich ne rend pas les visages dans la recherche (`withPeople`), c'est la première image du groupe. À regarder avant de retoucher le choix automatique.
-- Le temps de lecture : jusqu'à trois lectures d'album par étape (huit de front, gardées dix minutes).
-- Le trait animé sur un vrai iPhone.
+- 0.14 : la clé d'API lit-elle les tags (`tag.read`) ? La tuile « Scans de Millésime » de Connexion le dit. `SILLAGE_TAG_NON_DATEE` réglé dans la stack ? Un chemin avec des scans estimés.
+- 0.14 : la date de décès venue de carnet (il faut carnet 2.24.1).
+- Vérifié le 15/11/2026 : intersection `personIds`, iframe de la chambre, noms, photos phares, lecture des vidéos, temps de lecture, trait animé et police à la plume sur iPhone, vue des invités dans HA, personnes de carnet.
 
 ## Pas encore fait
 
-1. Scans datés « vers … », date de fin, tuile « À vérifier », cache des vignettes sur disque, lecture des vidéos.
+1. La V1 est complète. Ensuite, dans l'ordre décidé : un mois d'usage (critère : montré au moins trois fois, le chemin de cinq personnes relu sans erreur de personne ni de date), puis page imprimable du journal de naissance et carte frise Lovelace, Treemich écrit en lot, vidéo famille et amis en local, fusion dans carnet si le mois s'est bien passé.
 2. Un récit plus vivant : refusé pour l'instant (gabarit choisi, rien d'inventé).
 
 ## Décisions à ne pas rouvrir sans raison

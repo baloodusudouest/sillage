@@ -2,7 +2,11 @@
 
 Une étape est un groupe de photos proches en dates (moins de deux jours entre deux photos qui se
 suivent). Elle porte le nom de l'album de sa photo phare, à défaut celui de son dossier, à défaut
-sa date. Rien ici ne parle à Immich : les fonctions reçoivent ce qui a été lu."""
+sa date. Rien ici ne parle à Immich : les fonctions reçoivent ce qui a été lu.
+
+0.14 : les scans que Millésime a datés par estimation (`estimees` : photo → (année, marge)) forment une étape
+par année, dite « vers 1975 » ; les scans pas encore datés (`non_datees`) restent hors du chemin, comptés.
+Une date de fin (`personne["fin"]`, décès) arrête le chemin : ce qui est daté après est compté à part."""
 from __future__ import annotations
 
 import re
@@ -136,6 +140,14 @@ def _au_mois(e: dict) -> bool:
     return all(date_de(p) and date_de(p).day == 1 for p in e["groupe"])
 
 
+def estimation(valeur: str, debut: str) -> tuple[int, int] | None:
+    """0.14 : l'année et la marge d'un tag de Millésime (« Date estimée/1975 ±3 » → (1975, 3)) ; None sinon."""
+    if not debut or not valeur.startswith(debut + "/"):
+        return None
+    m = re.fullmatch(r"\s*((?:18|19|20)\d{2})\s*(?:±\s*(\d{1,2}))?\s*", valeur[len(debut) + 1:])
+    return (int(m.group(1)), int(m.group(2) or 0)) if m else None
+
+
 def regrouper(etapes: list[dict], personne: str) -> list[dict]:
     """0.9 : moins d'étapes, plus parlantes.
     - Les étapes du même nom proposé (album, dossier) à moins de deux mois d'écart n'en font qu'une, même si
@@ -146,6 +158,9 @@ def regrouper(etapes: list[dict], personne: str) -> list[dict]:
     reunies: list[dict] = []
     dernier: dict[str, dict] = {}
     for e in sorted(etapes, key=lambda x: x["debut"]):
+        if e.get("vers") is not None:                      # 0.14 : déjà une étape par année, rien à réunir
+            reunies.append(e)
+            continue
         if e["propose"]:
             cle = "nom:" + _plat(e["propose"])
             proche = dernier.get(cle)
@@ -182,15 +197,19 @@ def regrouper(etapes: list[dict], personne: str) -> list[dict]:
 
 def calculer(personne: dict, photos: Iterable[dict], noms_d_albums: Callable[[list[str]], dict[str, str]],
              mots: tuple[str, ...] = (), marques: dict[str, dict[str, str]] | None = None,
-             muets: tuple[str, ...] = (), decennies: bool = False) -> dict:
+             muets: tuple[str, ...] = (), decennies: bool = False,
+             estimees: dict[str, tuple[int, int]] | None = None, non_datees: set[str] | frozenset = frozenset()) -> dict:
     """Le chemin complet. `decennies` : chapitres par décennie du calendrier (« Années 1990 ») au lieu de l'âge,
     pour le chemin commun de plusieurs personnes. `noms_d_albums` reçoit des identifiants de photos et rend, pour celles qui sont dans un
-    album, le nom de cet album. `marques` : les corrections faites à la main, par empreinte de fichier."""
+    album, le nom de cet album. `marques` : les corrections faites à la main, par empreinte de fichier.
+    `estimees` / `non_datees` (0.14) : les scans datés par Millésime, et ceux qui attendent une date."""
     mots = tuple(_plat(m) for m in (mots or MOTS))
     marques = marques or {}
     marque = lambda p: marques.get(p.get("checksum") or "", {})
     naissance = jour(personne.get("birthDate"))
-    datees, sans_date, avant, de_cote = [], 0, 0, []
+    fin = jour(personne.get("fin"))
+    estimees = estimees or {}
+    datees, vers, sans_date, avant, apres, scans, de_cote = [], {}, 0, 0, 0, 0, []
     for p in photos:
         if not visible(p):
             continue
@@ -198,22 +217,35 @@ def calculer(personne: dict, photos: Iterable[dict], noms_d_albums: Callable[[li
         if "pas_elle" in m or "retiree" in m:
             de_cote.append({"id": p["id"], "sorte": "pas_elle" if "pas_elle" in m else "retiree", "video": p.get("type") == "VIDEO"})
             continue
+        estimee = estimees.get(p["id"])
+        if estimee is None and p["id"] in non_datees:     # scan qui attend sa date : hors du chemin, compté
+            scans += 1
+            continue
         quand = date_de(p)
         if quand is None:
             sans_date += 1
         elif naissance and quand.date() < naissance:
             avant += 1
+        elif fin and quand.date() > fin:
+            apres += 1
+        elif estimee is not None:                         # 0.14 : une étape par année estimée
+            vers.setdefault(estimee[0], []).append((quand, p, estimee[1]))
         else:
             datees.append((quand, p))
 
+    groupes = [(g, None) for g in grouper(datees)]
+    for annee, liste in sorted(vers.items()):
+        liste.sort(key=lambda x: x[0])
+        groupes.append(([(q, p) for q, p, _ in liste], max(m for _, _, m in liste)))
     etapes = []
-    for groupe in grouper(datees):
+    for groupe, marge in groupes:
         du_groupe = [p for _, p in groupe]
         choisie = next((p for p in du_groupe if "phare" in marque(p)), None)
         etapes.append({"debut": groupe[0][0], "fin": groupe[-1][0], "phare": choisie or photo_phare(du_groupe, personne["id"]),
                        "phare_choisie": choisie is not None, "groupe": du_groupe,
                        "titre": next((marque(p)["titre"] for p in du_groupe if marque(p).get("titre")), ""),
-                       "masquee": any("masquee" in marque(p) for p in du_groupe)})
+                       "masquee": any("masquee" in marque(p) for p in du_groupe),
+                       **({"vers": marge, "quand": f"vers {groupe[0][0].year}"} if marge is not None else {})})
     # Le nom vient de l'album : celui de la photo phare, de la première et de la dernière, le plus fréquent des trois.
     temoins = {id(e): list(dict.fromkeys(p["id"] for p in (e["phare"], e["groupe"][0], e["groupe"][-1]))) for e in etapes}
     albums = noms_d_albums([i for e in etapes if not e["titre"] for i in temoins[id(e)]])
@@ -240,14 +272,17 @@ def calculer(personne: dict, photos: Iterable[dict], noms_d_albums: Callable[[li
             chapitres.append({"cle": cle, "titre": titre, "etapes": []})
         masquees += e["masquee"]
         chapitres[-1]["etapes"].append({
-            "cle": f"{e['debut']:%Y%m%d%H%M%S}", "nom": nom, "nom_choisi": bool(e["titre"]), "debut": debut.isoformat(),
-            "fin": e["fin"].date().isoformat(), "quand": e.get("quand", ""), "fois": e.get("fois", 1), "age": ans, "nombre": len(e["groupe"]), "phare": e["phare"]["id"],
+            "cle": f"vers-{e['debut'].year}" if e.get("vers") is not None else f"{e['debut']:%Y%m%d%H%M%S}", "nom": nom, "nom_choisi": bool(e["titre"]), "debut": debut.isoformat(),
+            "fin": e["fin"].date().isoformat(), "quand": e.get("quand", ""), "fois": e.get("fois", 1), "age": ans, "vers": e.get("vers"), "nombre": len(e["groupe"]), "phare": e["phare"]["id"],
             "phare_choisie": e["phare_choisie"], "masquee": e["masquee"],
             "temps_fort": bool(nom) and (bool(e["titre"]) or any(m in _plat(nom) for m in mots)),
             "photos": [{"id": p["id"], "video": p.get("type") == "VIDEO"} for p in e["groupe"]]})
     return {
-        "personne": {"id": personne["id"], "nom": personne.get("name") or "", "naissance": naissance.isoformat() if naissance else None},
+        "personne": {"id": personne["id"], "nom": personne.get("name") or "", "naissance": naissance.isoformat() if naissance else None,
+                     "fin": fin.isoformat() if fin else None, "fin_source": personne.get("fin_source") if fin else None,
+                     "decede": bool(personne.get("decede") or fin)},
         "chapitres": chapitres,
-        "etapes": sum(len(c["etapes"]) for c in chapitres) - masquees, "masquees": masquees, "photos": len(datees),
-        "ecartees": {"avant_naissance": avant, "sans_date": sans_date}, "de_cote": de_cote,
+        "etapes": sum(len(c["etapes"]) for c in chapitres) - masquees, "masquees": masquees, "photos": len(datees) + sum(len(v) for v in vers.values()),
+        "ecartees": {"avant_naissance": avant, "sans_date": sans_date, "apres_fin": apres, "scans_non_dates": scans},
+        "de_cote": de_cote,
     }

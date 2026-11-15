@@ -4,6 +4,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -64,7 +65,8 @@ def test_le_chemin_de_camille(c):
     assert (plage["nom"], plage["nombre"], plage["age"], plage["temps_fort"]) == ("", 1, 8, False)
     assert (mariage["nom"], mariage["debut"], mariage["fin"], mariage["age"]) == ("Mariage de Camille et Hugo", "2019-06-15", "2019-06-16", 32)
     assert r["etapes"] == 3 and r["photos"] == 6
-    assert r["ecartees"] == {"avant_naissance": 1, "sans_date": 0}
+    assert r["ecartees"] == {"avant_naissance": 1, "sans_date": 0, "apres_fin": 0, "scans_non_dates": 0}
+    assert r["personne"]["fin"] is None and r["personne"]["decede"] is False
     assert r["immich"] == "http://photos.exemple" and r["immich_port"] == 0
 
 
@@ -325,7 +327,7 @@ def test_l_invite_seul_voit_son_chemin(monde):
     (c,) = r["chacun"]
     assert [ch["titre"] for ch in c["chapitres"]] == ["0 à 9 ans", "30 à 39 ans"]       # seul : par âge
     e = c["chapitres"][0]["etapes"][0]
-    assert set(e) == {"cle", "nom", "debut", "fin", "quand", "fois", "age", "nombre", "phare", "temps_fort"}   # pas la liste des photos
+    assert set(e) == {"cle", "nom", "debut", "fin", "quand", "fois", "age", "vers", "nombre", "phare", "temps_fort"}   # pas la liste des photos
     assert "immich" not in r and "de_cote" not in c
     assert client.get(f"/api/invite/{jeton}/vignette/{e['phare']}").status_code == 200
     assert client.get(f"/api/invite/{jeton}/vignette/{ident('bapteme1')}").status_code == 404   # pas une photo phare
@@ -576,3 +578,113 @@ def test_l_heure_de_la_nuit():
     assert main._prochaine(2, datetime(2026, 11, 14, 1, 30)) == datetime(2026, 11, 14, 2, 0)
     assert main._prochaine(2, datetime(2026, 11, 14, 2, 0)) == datetime(2026, 11, 15, 2, 0)
     assert main._prochaine(2, datetime(2026, 11, 14, 15, 57)) == datetime(2026, 11, 15, 2, 0)
+
+
+# ================================================================ 0.14 : scans de Millésime, date de fin
+
+def avec_tags(faux, non_datee=""):
+    """Des scans de Camille : deux datés par Millésime en 1992 (±2), un en 1994 (±1), un qui attend sa date
+    (daté du jour du scan, comme dans Immich), et un tag sans rapport. Noms de tags inventés."""
+    from dataclasses import replace
+    faux.photos[CAMILLE] += [photo("scan1", "1992-07-01T12:00:00", "Scans/Lot A", visage=0.2),
+                             photo("scan2", "1992-07-01T12:00:00", "Scans/Lot A"),
+                             photo("scan3", "1994-07-01T12:00:00", "Scans/Lot B"),
+                             photo("scan4", "2026-01-10T10:00:00", "Scans/Lot B"),
+                             photo("ete", "1992-07-01T12:00:00", "1992/1992-07-01 Été à la mer")]
+    faux.tags = {"t1": ("Date estimée/1992 ±2", [ident("scan1"), ident("scan2")]),
+                 "t2": ("Date estimée/1994 ±1", [ident("scan3")]),
+                 "t3": ("Lots/Non datée", [ident("scan4"), ident("scan3")]),   # un scan estimé garde parfois l'ancien tag
+                 "t4": ("Date estimée/inconnue", [ident("plage")]),
+                 "t5": ("Vacances", [ident("plage")])}
+    main.ETAT["cfg"] = replace(main.ETAT["cfg"], tag_non_datee=non_datee)
+    main.ETAT["reperes"] = None
+
+
+def test_scans_estimes_dits_vers(monde, c):
+    _, faux = monde
+    avec_tags(faux, non_datee="Lots/Non datée")
+    r = c.get(f"/api/chemin/{CAMILLE}").json()
+    par_cle = {e["cle"]: e for e in etapes(r)}
+    v92, v94 = par_cle["vers-1992"], par_cle["vers-1994"]
+    assert (v92["quand"], v92["vers"], v92["nombre"], v92["age"], v92["phare"]) == ("vers 1992", 2, 2, 5, ident("scan1"))
+    assert (v94["quand"], v94["vers"], v94["nombre"]) == ("vers 1994", 1, 1)       # estimé : le tag « non datée » ne compte plus
+    ete = next(e for e in etapes(r) if e["nom"] == "Été à la mer")
+    assert ete["vers"] is None and ete["nombre"] == 1                               # une vraie photo du même jour reste à part
+    assert all(e["vers"] is None for e in etapes(r) if not e["cle"].startswith("vers-"))
+    assert r["ecartees"]["scans_non_dates"] == 1                                    # le scan qui attend sa date : hors du chemin
+    assert r["photos"] == 6 + 3 + 1                                                 # les scans estimés comptent, pas celui en attente
+    assert ident("scan4") not in {p["id"] for e in etapes(r) for p in e["photos"]}
+    m = c.get("/api/services").json()["millesime"]
+    assert (m["lu"], m["estimees"], m["non_datees"], m["erreur"]) == (True, 3, 1, "")
+    # aucune écriture : les tags ne sont que lus
+    assert {(m, ch) for m, ch in faux.demandes if m != "GET"} <= {("POST", "/search/metadata")}
+
+
+def test_sans_reglage_le_scan_non_date_reste_dans_le_chemin(monde, c):
+    _, faux = monde
+    avec_tags(faux)                                       # SILLAGE_TAG_NON_DATEE vide
+    r = c.get(f"/api/chemin/{CAMILLE}").json()
+    assert r["ecartees"]["scans_non_dates"] == 0
+    assert ident("scan4") in {p["id"] for e in etapes(r) for p in e["photos"]}
+
+
+def test_tag_non_datee_introuvable_ou_tags_refuses(monde, c):
+    _, faux = monde
+    avec_tags(faux, non_datee="Lots/Autre nom")
+    c.get(f"/api/chemin/{CAMILLE}")
+    assert "introuvable" in c.get("/api/services").json()["millesime"]["erreur"]
+    faux.tags = {}
+    vrai = faux.repondre
+    faux.repondre = lambda d: httpx.Response(403, json={}) if d.url.path == "/api/tags" else vrai(d)
+    main.ETAT["immich"] = Immich("http://immich", "cle", transport=faux.transport())
+    main.ETAT["reperes"] = None
+    r = c.get(f"/api/chemin/{CAMILLE}")
+    assert r.status_code == 200 and not [e for e in etapes(r.json()) if e["vers"] is not None]   # le chemin se fait sans eux
+    m = c.get("/api/services").json()["millesime"]
+    assert m["lu"] is False and "droit" in m["erreur"]
+
+
+def test_estimation_lue_dans_le_tag():
+    assert calcul.estimation("Date estimée/1975 ±3", "Date estimée") == (1975, 3)
+    assert calcul.estimation("Date estimée/1975", "Date estimée") == (1975, 0)
+    assert calcul.estimation("Date estimée/vers 1975", "Date estimée") is None
+    assert calcul.estimation("Autre/1975 ±3", "Date estimée") is None
+    assert calcul.estimation("Date estimée/1975 ±3", "") is None
+
+
+def test_date_de_fin_saisie_dans_sillage(monde, c):
+    r = c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "2019-06-15"}).json()
+    assert r["personne"]["fin"] == "2019-06-15" and r["personne"]["fin_source"] == "sillage" and r["personne"]["decede"]
+    assert r["ecartees"]["apres_fin"] == 1                                          # la photo du 16 juin
+    assert etapes(r)[-1]["fin"] == "2019-06-15"
+    camille = next(p for p in c.get("/api/personnes").json()["personnes"] if p["id"] == CAMILLE)
+    assert camille["age"] is None and camille["fin"] == "2019-06-15" and camille["decede"]
+    assert c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "1980-01-01"}).status_code == 422   # avant la naissance
+    assert c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "2999-01-01"}).status_code == 422   # demain
+    assert c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "15/06/2019"}).status_code == 422
+    assert c.put(f"/api/personne/{ident('personne')}/fin", json={"date": "2019-06-15"}).status_code == 404
+    r = c.put(f"/api/personne/{CAMILLE}/fin", json={"date": ""}).json()
+    assert r["personne"]["fin"] is None and r["ecartees"]["apres_fin"] == 0
+
+
+def test_date_de_fin_venue_de_carnet(c):
+    avec_carnet((200, {"personnes": [
+        {"carnet_id": "f1", "nom": "Camille R.", "immich_id": CAMILLE, "groupes": [], "proche": True, "decede": True, "deces": "2019-06-15"},
+        {"carnet_id": "f2", "nom": "Hugo M.", "immich_id": HUGO, "groupes": [], "proche": True, "decede": True, "deces": ""}]}))
+    r = c.get(f"/api/chemin/{CAMILLE}").json()
+    assert (r["personne"]["fin"], r["personne"]["fin_source"]) == ("2019-06-15", "carnet")
+    assert c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "2019-01-01"}).status_code == 409   # carnet fait foi
+    hugo = c.get(f"/api/chemin/{HUGO}").json()["personne"]
+    assert hugo["decede"] and hugo["fin"] is None                                   # décédé sans date : à saisir
+    assert c.put(f"/api/personne/{HUGO}/fin", json={"date": "2002-05-01"}).json()["personne"]["fin_source"] == "sillage"
+
+
+def test_le_recit_dit_vers_pour_un_scan_estime(monde, c):
+    _, faux = monde
+    avec_tags(faux, non_datee="Lots/Non datée")
+    faux.albums[ident("scan1")] = "Kermesse de l'école"
+    c.put(f"/api/personne/{CAMILLE}/fin", json={"date": "2020-01-01"})
+    texte = c.get(f"/api/recit/{CAMILLE}").json()["texte"]
+    assert "Vers 1992, vers 5 ans : Kermesse de l'école." in texte
+    assert "Naissance le 14 mars 1987. Décès le 1er janvier 2020." in texte
+    assert "Le 1er juillet 1992, à 5 ans : Été à la mer." in texte              # la vraie photo du même jour garde sa date

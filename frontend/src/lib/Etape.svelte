@@ -49,7 +49,7 @@
   <header>
     <div class="min-w-0">
       <h2 class={etape.nom ? 'plume text-[2.4rem] text-balance' : 'text-xl font-semibold text-balance'}>{titre}</h2>
-      <p class="text-sm text-muted-foreground">{etape.nom ? quandDit(etape) + foisDit(etape) + ' · ' : ''}{ageDit(etape.age)}{etape.age != null ? ' · ' : ''}{etape.photos.length} photo{etape.photos.length > 1 ? 's' : ''}</p>
+      <p class="text-sm text-muted-foreground">{etape.nom ? quandDit(etape) + foisDit(etape) + ' · ' : ''}{ageDit(etape.age, etape.vers)}{etape.age != null ? ' · ' : ''}{etape.photos.length} photo{etape.photos.length > 1 ? 's' : ''}</p>
     </div>
     <div class="flex flex-none gap-2">
       <button type="button" class="rond" aria-label="Corriger l'étape" aria-pressed={corrige} onclick={ouvrirCorrection}><Pencil class="size-5" aria-hidden="true" /></button>

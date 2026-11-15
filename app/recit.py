@@ -27,16 +27,22 @@ def periode(debut: str, fin: str) -> str:
     return f"Du {_jour(a)} au {date_longue(fin)}"
 
 
-def age_dit(age: int | None) -> str:
-    return "" if age is None else ", avant un an" if age == 0 else ", à un an" if age == 1 else f", à {age} ans"
+def age_dit(age: int | None, vers: bool = False) -> str:
+    if age is None:
+        return ""
+    if vers:                                   # 0.14 : scan daté par estimation, l'âge l'est aussi
+        return ", vers un an" if age <= 1 else f", vers {age} ans"
+    return ", avant un an" if age == 0 else ", à un an" if age == 1 else f", à {age} ans"
 
 
 def proposer(chemin: dict) -> str:
     """Un paragraphe par chapitre. Les étapes nommées ont leur phrase ; les autres sont comptées."""
     p = chemin["personne"]
     lignes = [p["nom"], ""]
-    if p.get("naissance"):
-        lignes += [f"Naissance le {date_longue(p['naissance'])}.", ""]
+    if p.get("naissance") or p.get("fin"):
+        dates = ([f"Naissance le {date_longue(p['naissance'])}."] if p.get("naissance") else []) \
+            + ([f"Décès le {date_longue(p['fin'])}."] if p.get("fin") else [])
+        lignes += [" ".join(dates), ""]
     for c in chemin["chapitres"]:
         visibles = [e for e in c["etapes"] if not e["masquee"]]
         nommees = [e for e in visibles if e["nom"]]
@@ -44,7 +50,9 @@ def proposer(chemin: dict) -> str:
             continue
         lignes.append(c["titre"])
         for e in nommees:
-            lignes.append(f"{periode(e['debut'], e['fin'])}{age_dit(e['age'])} : {e['nom']}.")
+            estimee = e.get("vers") is not None
+            quand = f"Vers {e['debut'][:4]}" if estimee else periode(e['debut'], e['fin'])
+            lignes.append(f"{quand}{age_dit(e['age'], estimee)} : {e['nom']}.")
         autres = len(visibles) - len(nommees)
         if autres:
             debut = "Et " if nommees else ""

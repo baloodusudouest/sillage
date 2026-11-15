@@ -17,7 +17,9 @@ export function periode(debut, fin) {
   return `${jour(a.j)} – ${dateLongue(fin)}`
 }
 
-export const ageDit = (age) => (age == null ? '' : age === 0 ? 'avant 1 an' : age === 1 ? 'à 1 an' : `à ${age} ans`)
+// 0.14 : pour un scan daté par estimation (vers = la marge, nombre ou null), l'âge l'est aussi : « vers 5 ans »
+export const ageDit = (age, vers = null) =>
+  age == null ? '' : vers != null ? (age <= 1 ? 'vers 1 an' : `vers ${age} ans`) : age === 0 ? 'avant 1 an' : age === 1 ? 'à 1 an' : `à ${age} ans`
 
 // 0.9 : ce qu'on lit d'une étape : « 1998 » pour des scans réunis par année, sinon ses dates
 export const quandDit = (e) => e.quand || periode(e.debut, e.fin)

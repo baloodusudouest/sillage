@@ -228,6 +228,7 @@ def test_raconter(page):
 def test_connexion_et_reglages(page):
     page.goto(page.base + "/#/connexion")
     page.get_by_text("Répond, version 3.4.1. 2 personnes nommées.").wait_for()
+    page.get_by_text("2 scans datés par estimation, dits « vers … » ; 1 en attente de date, hors du chemin.").wait_for()   # 0.14
     page.goto(page.base + "/#/reglages")
     from app import __version__
     page.get_by_text(f"Sillage {__version__}").wait_for()
@@ -323,3 +324,30 @@ def test_060_onglet_chambres_apercu_des_invites(page):
     page.get_by_text("Pas encore de souvenirs ici").wait_for()
     assert page.locator("main main").count() == 0                                    # l'aperçu n'ouvre pas une seconde page
     sans_debordement(page)
+
+
+# ------------------------------------------------------------ 0.14 : scans de Millésime, date de fin
+
+def test_014_scans_vers_et_date_de_deces(page):
+    from tests.faux_immich import HUGO
+    page.goto(page.base + "/#/chemin/" + HUGO)
+    if page.locator("#mot-de-passe").count():                                        # les tests de l'invité ont vidé les cookies
+        page.fill("#mot-de-passe", MDP)
+        page.click("button[type=submit]")
+        page.goto(page.base + "/#/chemin/" + HUGO)
+    page.wait_for_selector(".etape")
+    scans = page.locator(".etape", has_text="vers 1978")
+    assert scans.count() == 1 and "2 photos" in scans.inner_text()
+    assert scans.locator(".point.vers").count() == 1                                  # le point en pointillé
+    assert page.get_by_text("1 scan pas encore daté").is_visible()
+    # la date de décès, saisie dans Sillage puis retirée
+    page.get_by_role("button", name="Ajouter une date de décès").click()
+    page.fill("#date-fin", "2010-05-01")
+    page.get_by_role("button", name="Garder").click()
+    page.get_by_text("Décès le 1er mai 2010").wait_for()
+    assert page.get_by_text("photo datée après son décès").count() == 0              # Hugo n'a rien après 2010 dans la démo
+    sans_debordement(page)
+    page.get_by_role("button", name="Changer la date de décès").click()
+    page.get_by_role("button", name="Retirer").click()
+    page.get_by_role("button", name="Ajouter une date de décès").wait_for()
+    assert page.get_by_text("Décès le").count() == 0

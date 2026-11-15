@@ -1,8 +1,9 @@
 <script>
-  // « Connexion » : le seul service de Sillage est Immich, et Sillage ne fait que le lire.
+  // « Connexion » : Immich, carnet et, depuis la 0.14, les tags que Millésime pose sur les scans. Sillage ne fait que lire.
   import { onMount } from 'svelte'
   import Images from '@lucide/svelte/icons/images'
   import BookUser from '@lucide/svelte/icons/book-user'
+  import Hourglass from '@lucide/svelte/icons/hourglass'
   import { api } from '$lib/api.js'
   import { Button } from '$lib/components/ui/button/index.js'
   import { Badge } from '$lib/components/ui/badge/index.js'
@@ -10,11 +11,12 @@
   let { ondeconnecte } = $props()
   let s = $state(null)
   let carnet = $state(null)
+  let millesime = $state(null)
   let attente = $state(false)
 
   async function lire() {
     attente = true
-    try { const r = await api.get('/api/services'); s = r.immich; carnet = r.carnet } catch (err) { if (err.statut === 401) ondeconnecte?.() }
+    try { const r = await api.get('/api/services'); s = r.immich; carnet = r.carnet; millesime = r.millesime } catch (err) { if (err.statut === 401) ondeconnecte?.() }
     attente = false
   }
   onMount(lire)
@@ -49,4 +51,15 @@
     {#if !carnet}Lecture…{:else if !carnet.regle}Pas réglé : la liste d'ouverture est celle des personnes nommées d'Immich.{:else if carnet.erreur}{carnet.erreur} La liste d'ouverture est celle d'Immich en attendant.{:else}Répond. {carnet.fiches} fiche{carnet.fiches > 1 ? 's liées' : ' liée'} à une personne d'Immich.{/if}
   </p>
   <p class="mt-2 text-sm text-muted-foreground">Sillage lit dans carnet la liste des fiches liées à Immich (nom, groupes). Il n'y écrit rien. Réglage : le même jeton dans SILLAGE_CARNET_JETON et dans CARNET_JETON_SILLAGE.</p>
+</section>
+
+<section class="mt-4 rounded-2xl border bg-card p-5" aria-label="Scans de Millésime">
+  <div class="flex items-start justify-between gap-3">
+    <h2 class="flex items-center gap-2 text-lg font-semibold"><Hourglass class="size-5 text-primary" aria-hidden="true" />Scans de Millésime</h2>
+    <span class="mt-1.5 size-2.5 rounded-full {millesime?.lu && !millesime.erreur ? 'bg-valide' : millesime?.erreur ? 'bg-destructive' : 'bg-muted-foreground/40'}" aria-hidden="true"></span>
+  </div>
+  <p class="mt-1 text-sm" role="status">
+    {#if !millesime}Lecture…{:else if !millesime.regle}Pas réglé : les scans sont pris avec la date qu'ils portent dans Immich.{:else if !millesime.lu}{millesime.erreur}{:else}{millesime.estimees} scan{millesime.estimees > 1 ? 's datés' : ' daté'} par estimation, dits « vers … » ; {millesime.non_datees} en attente de date, hors du chemin.{#if millesime.erreur} {millesime.erreur}{/if}{/if}
+  </p>
+  <p class="mt-2 text-sm text-muted-foreground">Sillage lit dans Immich les tags que Millésime pose sur les scans : SILLAGE_TAG_ESTIMEE (« Date estimée » par défaut) et SILLAGE_TAG_NON_DATEE (le tag complet des scans non datés, vide : pas lu). La clé d'API doit pouvoir lire les tags. Rien n'est écrit.</p>
 </section>

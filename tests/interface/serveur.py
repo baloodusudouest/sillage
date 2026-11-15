@@ -43,6 +43,12 @@ def vie() -> FauxImmich:
         + serie("anniv", "2022-03-14", 8, "2022/2022-03-14 Anniversaire 35 ans")
         + [photo("trop-tot", "1975-01-01T10:00:00")])
     faux.photos[CAMILLE][10 + 4]["type"] = "VIDEO"
+    # 0.14 : des scans de Hugo, deux datés par Millésime (« vers 1978 »), un qui attend sa date (tags inventés)
+    faux.photos[HUGO] = faux.photos[HUGO] + [photo("scan-a", "1978-07-01T12:00:00", "Scans/Numérisation A"),
+                                             photo("scan-b", "1978-07-01T12:00:00", "Scans/Numérisation A"),
+                                             photo("scan-c", "2026-01-10T10:00:00", "Scans/Numérisation A")]
+    faux.tags = {"t1": ("Date estimée/1978 ±3", [ident("scan-a"), ident("scan-b")]),
+                 "t2": ("Lots/Non datée", [ident("scan-c")])}
     # 0.12 : les photos du mariage forment un album (le faux Immich sert aussi /albums/{id} et ses photos)
     faux.albums = {p["id"]: "Mariage de Camille et Hugo" for p in faux.photos[CAMILLE] if "mariage" in p["originalPath"]}
     reponse = faux.repondre
@@ -60,7 +66,7 @@ def main_() -> None:
     (racine / "data").mkdir(parents=True, exist_ok=True)
     cfg = Config(password=MDP, immich_url="http://immich", immich_cle="cle", data=racine / "data",
                  static=Path(__file__).resolve().parents[2] / "app" / "static", immich_adresse="http://photos.exemple",
-                 attente_connexion=False, jeton_ha="jeton-ha")
+                 attente_connexion=False, jeton_ha="jeton-ha", tag_non_datee="Lots/Non datée")
     main.ETAT.update(cfg=cfg, immich=Immich("http://immich", "cle", transport=vie().transport()))
     # 0.5 : trois invitations de démonstration, notées dans invites.json pour les tests d'écran
     import json

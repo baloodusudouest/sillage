@@ -66,7 +66,7 @@
         <a href={'#/chemin/' + p.id} class="flex h-full flex-col items-center gap-2 rounded-2xl border bg-card p-4 text-center transition-colors hover:border-primary">
           <img src={'/api/portrait/' + p.id} alt="" loading="lazy" class="size-20 rounded-full bg-secondary object-cover" />
           <span class="font-medium text-balance">{p.nom}</span>
-          <span class="text-sm text-muted-foreground">{p.age != null ? p.age + ' ans' : p.naissance ? 'né(e) en ' + p.naissance.slice(0, 4) : 'date de naissance inconnue'}{parCarnet && !p.carnet ? ' · hors carnet' : ''}</span>
+          <span class="text-sm text-muted-foreground">{p.age != null ? p.age + ' ans' : p.fin ? (p.naissance ? p.naissance.slice(0, 4) + ' – ' : '† ') + p.fin.slice(0, 4) : p.naissance ? 'né(e) en ' + p.naissance.slice(0, 4) : 'date de naissance inconnue'}{parCarnet && !p.carnet ? ' · hors carnet' : ''}</span>
         </a>
       </li>
     {/each}

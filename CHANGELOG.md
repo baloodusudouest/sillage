@@ -1,5 +1,14 @@
 # Journal des versions
 
+## 0.14.0 — 15 novembre 2026
+- **Les scans datés par Millésime entrent dans le chemin, dits « vers 1975 ».** Sillage lit dans Immich les tags que Millésime pose (`Date estimée/1975 ±3`, début réglable par `SILLAGE_TAG_ESTIMEE`) : les scans d'une même année estimée font une étape, « vers 1975 », avec l'âge « vers 5 ans » et un point en pointillé sur le trait. Ils ne se mêlent pas aux vraies photos du même jour. Vaut aussi pour la page des invités et pour « Raconter » (« Vers 1975, vers 5 ans : … »).
+- **Les scans qui attendent leur date restent hors du chemin**, comptés sous le chemin (« 3 scans pas encore datés ») : réglage `SILLAGE_TAG_NON_DATEE`, le tag complet des scans non datés, le même que dans Millésime. Vide : pas lu, ces scans gardent la date qu'ils ont dans Immich. Un scan estimé qui porte encore ce tag est pris comme estimé.
+- **Date de décès.** Elle vient de carnet quand la fiche en a une complète (carnet 2.24.1 et suivantes) ; sinon elle se saisit sous le nom, sur le chemin (« Ajouter une date de décès », « Décès sans date : la saisir » quand carnet dit la personne décédée). Gardée dans Sillage seulement. L'âge s'arrête : la liste montre « 1932 – 2019 » ; ce qui est daté après le décès sort du chemin et est compté. « Raconter » l'écrit après la naissance.
+- **Connexion** : une tuile « Scans de Millésime » (scans estimés, scans en attente, tag introuvable, droit manquant). La clé d'API de Sillage doit pouvoir lire les tags (`tag.read`) ; sans ce droit, le chemin se fait comme avant et la tuile le dit.
+- Toujours rien d'écrit dans Immich ni dans carnet : les tags sont lus par une recherche.
+- Jamais essayé sur la vraie installation : la lecture des tags (droit `tag.read`), le temps pris par la recherche d'un tag d'estimation par année.
+- Tests : 48 du serveur, 26 d'écran.
+
 ## 0.13.0 — 14 novembre 2026
 - **Frises des invités prêtes d'avance.** Dès que Home Assistant pose les invités d'une chambre (`/ha/sejour`), Sillage prépare leur frise en fond, la garde dans sa base (table `frises`) et lit d'avance les photos phares dans le cache sur disque. La page de la chambre s'affiche alors sans rien demander à Immich, même après un redémarrage.
 - **Mise à jour une fois par nuit**, à 2 h (heure du conteneur, `TZ` de la stack ; réglable par `SILLAGE_HEURE_FRISES`) : les frises de toutes les invitations en cours sont refaites avec les photos ajoutées, les noms d'albums relus.

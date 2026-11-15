@@ -24,6 +24,8 @@ class Config:
     muets: tuple[str, ...] = ()      # noms de dossier qui ne disent rien, en plus de la liste par défaut
     cache_mo: int = 500              # 0.10 : place des vignettes gardées sur disque (Mo) ; 0 : pas de cache
     heure_frises: int = 2            # 0.13 : heure de la mise à jour nocturne des frises des invités (heure du conteneur, TZ)
+    tag_estimee: str = "Date estimée"   # 0.14 : début des tags posés par Millésime (« Date estimée/1975 ±3 ») ; vide : pas lu
+    tag_non_datee: str = ""          # 0.14 : tag complet des scans pas encore datés (celui de Millésime) ; vide : pas lu
     attente_connexion: bool = True   # délai anti-essais ; coupé dans les tests
 
 
@@ -48,5 +50,7 @@ def charger() -> Config:
         muets=tuple(m.strip() for m in os.environ.get("SILLAGE_DOSSIERS_MUETS", "").split(",") if m.strip()),
         cache_mo=int(os.environ.get("SILLAGE_CACHE_MO") or 500) if (os.environ.get("SILLAGE_CACHE_MO") or "500").strip().isdigit() else 500,
         heure_frises=int(h) % 24 if (h := (os.environ.get("SILLAGE_HEURE_FRISES") or "2").strip()).isdigit() else 2,
+        tag_estimee=os.environ.get("SILLAGE_TAG_ESTIMEE", "Date estimée").strip().rstrip("/"),
+        tag_non_datee=os.environ.get("SILLAGE_TAG_NON_DATEE", "").strip(),
         mots=tuple(m.strip().lower() for m in os.environ.get("SILLAGE_MOTS", "").split(",") if m.strip()),
     )

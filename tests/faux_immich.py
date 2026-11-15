@@ -55,6 +55,7 @@ class FauxImmich:
             HUGO: [photo("hugo1", "2001-02-03T10:00:00"), photo("hugo2", "2002-02-03T10:00:00")],
         }
         self.albums = {ident("mariage2"): "Mariage de Camille et Hugo"}
+        self.tags: dict[str, tuple[str, list[str]]] = {}   # 0.14 : id du tag → (valeur, photos qui le portent)
 
     @staticmethod
     def _avec_visages(p: dict, qui: str) -> dict:
@@ -72,8 +73,14 @@ class FauxImmich:
             return httpx.Response(200, json={"major": 3, "minor": 4, "patch": 1})
         if chemin == "/people":
             return httpx.Response(200, json={"people": self.personnes, "hasNextPage": False})
+        if chemin == "/tags":
+            return httpx.Response(200, json=[{"id": i, "value": v} for i, (v, _) in self.tags.items()])
         if chemin == "/search/metadata" and demande.method == "POST":
             corps = json.loads(demande.content)
+            if "tagIds" in corps:                          # 0.14 : les photos qui portent un tag
+                voulues = set(self.tags.get(corps["tagIds"][0], ("", []))[1])
+                items = [x for liste in self.photos.values() for x in liste if x["id"] in voulues]
+                return httpx.Response(200, json={"assets": {"items": list({x["id"]: x for x in items}.values()), "nextPage": None}})
             ids = corps["personIds"]
             items = [self._avec_visages(p, ids[0]) for p in self.photos.get(ids[0], [])]
             if len(ids) > 1:                       # comme Immich : les photos où toutes ces personnes sont reconnues

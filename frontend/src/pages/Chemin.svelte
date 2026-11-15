@@ -19,6 +19,8 @@
   let ouverte = $state(null)          // clé de l'étape ouverte
   let masquees = $state(false)        // montrer aussi les étapes masquées
   let deCote = $state(false)          // montrer les photos mises de côté
+  let finOuverte = $state(false)      // 0.14 : le champ de la date de fin
+  let finSaisie = $state('')
 
   const visibles = (c) => c.etapes.filter((e) => masquees || !e.masquee)
   const forts = $derived(chemin ? chemin.chapitres.reduce((n, c) => n + visibles(c).filter((e) => e.temps_fort).length, 0) : 0)
@@ -30,6 +32,18 @@
     return chemin.chapitres
       .map((c) => ({ ...c, etapes: visibles(c).filter((e) => !filtre || e.temps_fort).map((e) => ({ ...e, cote: rang++ % 2 ? 'droite' : 'gauche' })) }))
       .filter((c) => c.etapes.length)
+  })
+  // 0.14 : ce qui reste hors du chemin, dit en une phrase
+  const pluriel = (n, un, plusieurs) => `${n} ${n > 1 ? plusieurs : un}`
+  const hors = $derived.by(() => {
+    const x = chemin?.ecartees
+    if (!x) return []
+    return [
+      x.avant_naissance && pluriel(x.avant_naissance, "photo datée d'avant sa naissance", "photos datées d'avant sa naissance"),
+      x.apres_fin && pluriel(x.apres_fin, 'photo datée après son décès', 'photos datées après son décès'),
+      x.sans_date && pluriel(x.sans_date, 'sans date lisible', 'sans date lisible'),
+      x.scans_non_dates && pluriel(x.scans_non_dates, 'scan pas encore daté', 'scans pas encore datés'),
+    ].filter(Boolean)
   })
   const etapeOuverte = $derived(ouverte && chemin ? chemin.chapitres.flatMap((c) => c.etapes).find((e) => e.cle === ouverte) || null : null)
 
@@ -45,6 +59,13 @@
         ouverte = chemin.chapitres.flatMap((c) => c.etapes).find((e) => e.photos.some((p) => restantes.has(p.id)))?.cle ?? null
       }
     } catch (err) { if (err.statut === 401) ondeconnecte?.(); else erreur = err.message }
+  }
+
+  // 0.14 : la date de fin (décès), saisie dans Sillage quand carnet n'en donne pas. Vide : retirée.
+  async function poserFin(valeur) {
+    erreur = ''
+    try { chemin = await api.put(`/api/personne/${id}/fin`, { date: valeur }); finOuverte = false }
+    catch (err) { if (err.statut === 401) ondeconnecte?.(); else erreur = err.message }
   }
 
   // Le trait se dessine à mesure qu'on descend ; les étapes apparaissent en entrant dans l'écran.
@@ -93,8 +114,23 @@
       <p class="etiquette">Sillage</p>
       <h1 class="titre text-balance">{chemin.personne.nom}</h1>
       <p class="mt-1 text-sm text-muted-foreground">
-        {chemin.personne.naissance ? 'Naissance le ' + dateLongue(chemin.personne.naissance) + ' · ' : ''}{chemin.etapes} étape{chemin.etapes > 1 ? 's' : ''}, {chemin.photos} photo{chemin.photos > 1 ? 's' : ''}
+        {chemin.personne.naissance ? 'Naissance le ' + dateLongue(chemin.personne.naissance) + ' · ' : ''}{chemin.personne.fin ? 'Décès le ' + dateLongue(chemin.personne.fin) + ' · ' : ''}{chemin.etapes} étape{chemin.etapes > 1 ? 's' : ''}, {chemin.photos} photo{chemin.photos > 1 ? 's' : ''}
       </p>
+      {#if chemin.personne.fin_source === 'carnet'}
+        <p class="mt-1 text-xs text-muted-foreground">Date de décès venue de carnet.</p>
+      {:else if !finOuverte}
+        <button type="button" class="lien mt-1 text-xs" onclick={() => { finSaisie = chemin.personne.fin || ''; finOuverte = true }}>
+          {chemin.personne.fin ? 'Changer la date de décès' : chemin.personne.decede ? 'Décès sans date : la saisir' : 'Ajouter une date de décès'}
+        </button>
+      {:else}
+        <form class="fin mt-2" onsubmit={(ev) => { ev.preventDefault(); poserFin(finSaisie) }}>
+          <label for="date-fin" class="text-xs text-muted-foreground">Date de décès</label>
+          <input id="date-fin" type="date" bind:value={finSaisie} min={chemin.personne.naissance || undefined} max={new Date().toISOString().slice(0, 10)} required />
+          <Button type="submit" size="sm">Garder</Button>
+          {#if chemin.personne.fin}<Button type="button" size="sm" variant="outline" onclick={() => poserFin('')}>Retirer</Button>{/if}
+          <Button type="button" size="sm" variant="ghost" onclick={() => (finOuverte = false)}>Annuler</Button>
+        </form>
+      {/if}
     </div>
     <div class="flex w-full items-center gap-2 sm:w-auto">
       {#if forts > 0}
@@ -121,12 +157,12 @@
         <ol>
           {#each c.etapes as e (e.cle)}
             <li class="etape {e.cote}" class:petite={e.nombre === 1 && !e.nom} class:masquee={e.masquee} use:apparait>
-              <span class="point" class:fort={e.temps_fort} aria-hidden="true"></span>
+              <span class="point" class:fort={e.temps_fort} class:vers={e.vers != null} aria-hidden="true"></span>
               <button type="button" class="carte" onclick={() => (ouverte = e.cle)} aria-label={(e.nom || quandDit(e)) + ', ' + e.nombre + ' photo' + (e.nombre > 1 ? 's' : '')}>
                 <img src={'/api/vignette/' + e.phare} alt="" loading="lazy" />
                 <span class="dit">
                   <strong class:plume={!!e.nom}>{#if e.masquee}<EyeOff class="mr-1 inline size-4 align-[-2px]" aria-label="Masquée" />{/if}{e.nom || quandDit(e)}</strong>
-                  <small>{e.nom ? quandDit(e) + foisDit(e) + ' · ' : ''}{ageDit(e.age)}{e.age != null && e.nombre > 1 ? ' · ' : ''}{e.nombre > 1 ? e.nombre + ' photos' : ''}</small>
+                  <small>{e.nom ? quandDit(e) + foisDit(e) + ' · ' : ''}{ageDit(e.age, e.vers)}{e.age != null && e.nombre > 1 ? ' · ' : ''}{e.nombre > 1 ? e.nombre + ' photos' : ''}</small>
                 </span>
               </button>
             </li>
@@ -136,12 +172,11 @@
     {/each}
   </div>
 
-  {#if chemin.ecartees.avant_naissance || chemin.ecartees.sans_date}
+  {#if hors.length}
     <p class="mt-8 rounded-2xl border bg-card p-4 text-sm text-muted-foreground" role="note">
-      Laissées hors du chemin :
-      {#if chemin.ecartees.avant_naissance}{chemin.ecartees.avant_naissance} photo{chemin.ecartees.avant_naissance > 1 ? 's datées' : ' datée'} d'avant sa naissance{chemin.ecartees.sans_date ? ', ' : '.'}{/if}
-      {#if chemin.ecartees.sans_date}{chemin.ecartees.sans_date} sans date lisible.{/if}
-      Leur date est sans doute à corriger dans Immich ou dans Millésime.
+      Laissées hors du chemin : {hors.join(', ')}.
+      {#if chemin.ecartees.avant_naissance || chemin.ecartees.sans_date || chemin.ecartees.apres_fin}Leur date est sans doute à corriger dans Immich ou dans Millésime.{/if}
+      {#if chemin.ecartees.scans_non_dates}Les scans entreront dans le chemin quand Millésime les aura datés.{/if}
     </p>
   {/if}
 {/if}
@@ -198,6 +233,11 @@
   .etape { position: relative; padding-left: calc(var(--trait) * 2 + 0.25rem); min-width: 0; }
   .point { z-index: 1; position: absolute; left: var(--trait); top: 1.6rem; width: 0.7rem; height: 0.7rem; margin-left: -0.35rem; border-radius: 50%; background: var(--background); border: 2px solid var(--app); }
   .point.fort { background: var(--app); width: 0.95rem; height: 0.95rem; margin-left: -0.475rem; }
+  /* 0.14 : un scan daté par estimation : le point en pointillé */
+  .point.vers { background: var(--background); border-style: dashed; }
+  .fin { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
+  .fin input { height: 2rem; padding: 0 0.6rem; border: 1px solid var(--border); border-radius: 0.6rem; background: var(--background); color: var(--foreground); color-scheme: dark; }
+  .lien { display: inline-flex; align-items: center; min-height: 2rem; padding: 0; border: 0; background: none; cursor: pointer; color: var(--app); text-decoration: underline; text-underline-offset: 3px; }
   .carte { display: flex; flex-direction: column; width: 100%; max-width: 26rem; overflow: hidden; text-align: left; border: 1px solid var(--border); border-radius: 1.1rem; background: var(--card); transition: border-color 0.2s, transform 0.2s; }
   .carte:hover { border-color: var(--app); transform: translateY(-2px); }
   .carte img { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; background: var(--secondary); }

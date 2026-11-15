@@ -1,7 +1,12 @@
 """Sillage : le chemin de vie d'une personne, lu dans Immich. Lecture seule.
 
 Routes : /health (publique), /api/session, /api/connexion, /api/deconnexion, /api/personnes,
-/api/chemin/{personne} (et /marque), /api/recit/{personne}, /api/portrait/{personne}, /api/vignette/{photo}, /api/services, puis l'interface.
+/api/chemin/{personne} (et /marque), /api/personne/{personne}/fin, /api/recit/{personne}, /api/portrait/{personne},
+/api/vignette/{photo}, /api/services, puis l'interface.
+
+0.14 : les scans datés par Millésime (tag « Date estimée/AAAA ±N ») entrent dans le chemin, dits « vers 1975 » ;
+ceux qui attendent une date (SILLAGE_TAG_NON_DATEE) restent à part, comptés. La date de fin d'une personne décédée
+vient de carnet, sinon elle se saisit dans Sillage.
 
 0.13 : la frise d'une invitation est préparée dès que Home Assistant la pose, gardée dans la base, et refaite
 chaque nuit (SILLAGE_HEURE_FRISES, 2 h par défaut) avec les photos ajoutées : l'invité ne fait jamais attendre Immich.
@@ -57,7 +62,7 @@ async def cycle(app: FastAPI):
     cfg.data.mkdir(parents=True, exist_ok=True)
     ETAT.setdefault("immich", Immich(cfg.immich_url, cfg.immich_cle))
     ETAT.update(cfg=cfg, sessions=Sessions(APPLI, cfg.password, _lire_generation(cfg)),
-                personnes=None, lues={}, albums={}, connues={}, derniere_lecture=None, toutes=None, invites={},
+                personnes=None, lues={}, albums={}, connues={}, derniere_lecture=None, toutes=None, invites={}, reperes=None,
                 base=Base(cfg.data / "sillage.db"), cache=Cache(cfg.data / "vignettes", cfg.cache_mo),
                 fond=[], verrous={}, nuit=None)
     # Les invitations posées sans frise (base d'avant la 0.13, arrêt pendant une préparation) sont préparées au démarrage
@@ -164,18 +169,63 @@ def _personnes(frais: bool = False) -> dict[str, dict]:
     if garde_ and not frais and time.monotonic() - garde_[0] < MEMOIRE:
         return garde_[1]
     fiches, erreur = _de_carnet()
+    saisies = ETAT["base"].reglage("fins", {})
     liste = {}
     for p in ETAT["immich"].personnes():
         fiche = fiches.get(p["id"])
         if fiche:
             liste[p["id"]] = {**p, "name": fiche.get("nom") or p.get("name") or "", "carnet": True,
-                              "proche": bool(fiche.get("proche")), "decede": bool(fiche.get("decede"))}
+                              "proche": bool(fiche.get("proche")), "decede": bool(fiche.get("decede")),
+                              **_fin(p["id"], fiche, saisies)}
         elif (p.get("name") or "").strip() and not p.get("isHidden"):
-            liste[p["id"]] = {**p, "carnet": False}
+            liste[p["id"]] = {**p, "carnet": False, **_fin(p["id"], None, saisies)}
     ETAT["personnes"] = (time.monotonic(), liste)
     ETAT["carnet"] = {"regle": bool(ETAT["cfg"].carnet_jeton), "erreur": erreur, "fiches": len(fiches)}
     ETAT["derniere_lecture"] = time.time()
     return liste
+
+
+def _fin(personne: str, fiche: dict | None, saisies: dict) -> dict:
+    """0.14 : la date de fin (décès) d'une personne : celle de carnet si la fiche en a une complète,
+    sinon celle saisie dans Sillage. Rien : un dictionnaire vide."""
+    de_carnet = calcul.jour((fiche or {}).get("deces"))
+    if de_carnet:
+        return {"fin": de_carnet.isoformat(), "fin_source": "carnet"}
+    if calcul.jour(saisies.get(personne)):
+        return {"fin": saisies[personne], "fin_source": "sillage"}
+    return {}
+
+
+def _reperes(frais: bool = False) -> tuple[dict[str, tuple[int, int]], set[str]]:
+    """0.14 : les scans datés par Millésime (photo → (année, marge)) et ceux qui attendent une date, lus par leurs
+    tags et gardés dix minutes. Sans droit de lire les tags, le chemin se fait sans eux (Connexion le dit)."""
+    cfg, garde_ = ETAT["cfg"], ETAT.get("reperes")
+    if garde_ and not frais and time.monotonic() - garde_[0] < MEMOIRE:
+        return garde_[1], garde_[2]
+    estimees: dict[str, tuple[int, int]] = {}
+    non_datees: set[str] = set()
+    etat = {"lu": False, "erreur": "", "estimees": 0, "non_datees": 0,
+            "regle": bool(cfg.tag_estimee or cfg.tag_non_datee)}
+    if etat["regle"]:
+        try:
+            tags = ETAT["immich"].etiquettes()
+            for t in tags:
+                valeur = t.get("value") or ""
+                trouve = calcul.estimation(valeur, cfg.tag_estimee)
+                if trouve:
+                    for i in ETAT["immich"].ids_du_tag(t["id"]):
+                        estimees[i] = trouve
+                elif cfg.tag_non_datee and valeur == cfg.tag_non_datee:
+                    non_datees.update(ETAT["immich"].ids_du_tag(t["id"]))
+            etat.update(lu=True, estimees=len(estimees), non_datees=len(non_datees - set(estimees)))
+            if cfg.tag_non_datee and not any((t.get("value") or "") == cfg.tag_non_datee for t in tags):
+                etat["erreur"] = "Le tag des scans non datés réglé dans SILLAGE_TAG_NON_DATEE est introuvable dans Immich."
+        except ErreurImmich as exc:
+            log.warning("Tags illisibles : %s", exc)
+            etat["erreur"] = str(exc)
+    ETAT["reperes"] = (time.monotonic(), estimees, non_datees)
+    ETAT["reperes_etat"] = etat
+    return estimees, non_datees
 
 
 @app.get("/api/personnes")
@@ -186,8 +236,9 @@ def personnes(frais: bool = False):
     for p in _personnes(frais).values():
         naissance = calcul.jour(p.get("birthDate"))
         sortie.append({"id": p["id"], "nom": p["name"].strip(), "naissance": naissance.isoformat() if naissance else None,
-                       "age": calcul.age(naissance, aujourd_hui) if naissance and not p.get("decede") else None,
-                       "carnet": bool(p.get("carnet")), "proche": bool(p.get("proche")), "decede": bool(p.get("decede"))})
+                       "age": calcul.age(naissance, aujourd_hui) if naissance and not p.get("decede") and not p.get("fin") else None,
+                       "fin": p.get("fin"), "carnet": bool(p.get("carnet")), "proche": bool(p.get("proche")),
+                       "decede": bool(p.get("decede") or p.get("fin"))})
     par_carnet = any(p["carnet"] for p in sortie)
     return {"personnes": sorted(sortie, key=lambda p: calcul._plat(p["nom"])), "par_carnet": par_carnet,
             "carnet": ETAT.get("carnet", {})}
@@ -214,11 +265,14 @@ def _chemin(personne: str, frais: bool = False) -> dict:
     if not garde_ or frais or time.monotonic() - garde_[0] > MEMOIRE:
         if frais:
             ETAT["albums"].clear()
+            _reperes(frais=True)
         garde_ = (time.monotonic(), list(ETAT["immich"].photos_de(personne)))
         with VERROU:
             ETAT["lues"][personne] = garde_
             ETAT["connues"].update({p["id"]: p.get("checksum") or "" for p in garde_[1] if calcul.visible(p)})
-    resultat = calcul.calculer(fiche, garde_[1], _noms_d_albums, ETAT["cfg"].mots, ETAT["base"].marques(personne), ETAT["cfg"].muets)
+    estimees, non_datees = _reperes()
+    resultat = calcul.calculer(fiche, garde_[1], _noms_d_albums, ETAT["cfg"].mots, ETAT["base"].marques(personne), ETAT["cfg"].muets,
+                               estimees=estimees, non_datees=non_datees)
     resultat["immich"] = ETAT["cfg"].immich_adresse
     resultat["immich_port"] = ETAT["cfg"].immich_port
     return resultat
@@ -248,6 +302,33 @@ def marquer(personne: str, corps: dict = Body(...)):
     ETAT["base"].marquer(personne, sorte, [connues[str(i)] for i in (corps.get("effacer") or [])],
                          connues[str(corps["poser"])] if corps.get("poser") else None, valeur)
     # 0.13 : les frises d'invités où paraît cette personne sont refaites avec la correction
+    _oublier([i["jeton"] for i in ETAT["base"].invitations() if any(p["id"] == personne for p in i["personnes"])])
+    return _chemin(personne)
+
+
+@app.put("/api/personne/{personne}/fin")
+def poser_fin(personne: str, corps: dict = Body(...)):
+    """0.14 : la date de fin (décès) saisie dans Sillage, quand carnet n'en donne pas. Vide : retirée.
+    Gardée dans Sillage seulement : rien n'est écrit dans Immich ni dans carnet."""
+    fiche = _personnes().get(personne)
+    if not fiche:
+        raise HTTPException(404, "Personne inconnue de Sillage.")
+    if fiche.get("fin_source") == "carnet":
+        raise HTTPException(409, "La date vient de carnet : change-la dans carnet (ou sur l'iPhone).")
+    texte = str(corps.get("date") or "").strip()
+    saisies = ETAT["base"].reglage("fins", {})
+    if texte:
+        quand = calcul.jour(texte)
+        if not quand or len(texte) != 10:
+            raise HTTPException(422, "Date illisible (AAAA-MM-JJ).")
+        naissance = calcul.jour(fiche.get("birthDate"))
+        if quand > date.today() or (naissance and quand < naissance):
+            raise HTTPException(422, "La date doit tomber entre la naissance et aujourd'hui.")
+        saisies[personne] = quand.isoformat()
+    else:
+        saisies.pop(personne, None)
+    ETAT["base"].poser_reglage("fins", saisies)
+    ETAT["personnes"] = None
     _oublier([i["jeton"] for i in ETAT["base"].invitations() if any(p["id"] == personne for p in i["personnes"])])
     return _chemin(personne)
 
@@ -341,7 +422,7 @@ def _pour_invite(c: dict, photos_etapes: dict | None = None) -> dict:
             for e in ch["etapes"]:
                 if not e["masquee"]:
                     photos_etapes.setdefault(e["phare"], []).extend(p["id"] for p in e.get("photos", []) if not p["video"])
-        etapes = [{k: e[k] for k in ("cle", "nom", "debut", "fin", "quand", "fois", "age", "nombre", "phare", "temps_fort")}
+        etapes = [{k: e.get(k) for k in ("cle", "nom", "debut", "fin", "quand", "fois", "age", "vers", "nombre", "phare", "temps_fort")}
                   for e in ch["etapes"] if not e["masquee"]]
         if etapes:
             chapitres.append({"cle": ch["cle"], "titre": ch["titre"], "etapes": etapes})
@@ -373,8 +454,9 @@ def _ensemble(gens: list[dict], fiches: dict, lire_marques, cfg, photos_etapes: 
     for qui, fiche, photos, marques in groupes:
         if not photos:
             continue
+        estimees, non_datees = _reperes()
         for ch in _pour_invite(calcul.calculer(fiche, photos, _noms_d_albums, cfg.mots, marques, cfg.muets,
-                                               decennies=True), photos_etapes)["chapitres"]:
+                                               decennies=True, estimees=estimees, non_datees=non_datees), photos_etapes)["chapitres"]:
             dest = chapitres.setdefault(ch["cle"], {"cle": ch["cle"], "titre": ch["titre"], "etapes": []})
             dest["etapes"] += [{**e, "cle": f"{qui}-{e['cle']}", "qui": qui} for e in ch["etapes"]]
     if not any(ch["etapes"] for ch in chapitres.values()):
@@ -399,8 +481,9 @@ def _calculer(inv: dict) -> dict:
     elif gens:
         g = gens[0]
         fiche = {**fiches.get(g["id"], {"id": g["id"]}), "name": g["nom"]}
+        estimees, non_datees = _reperes()
         c = _pour_invite(calcul.calculer(fiche, ETAT["immich"].photos_de(g["id"]), _noms_d_albums, cfg.mots,
-                                         lire_marques(g["id"]), cfg.muets), photos_etapes)
+                                         lire_marques(g["id"]), cfg.muets, estimees=estimees, non_datees=non_datees), photos_etapes)
         chacun = [c] if c["etapes"] else []
     resultat = {"invites": [p["nom"] for p in inv["personnes"]], "commun": commun, "chacun": chacun,
                 "accueil": commun is None and not chacun}
@@ -638,11 +721,14 @@ def services():
     try:
         version, erreur = ETAT["immich"].version(), ""
         nombre = len(_personnes(frais=True))
+        _reperes(frais=True)
     except ErreurImmich as exc:
         version, erreur, nombre = "", str(exc), 0
     return {"immich": {"repond": not erreur, "version": version, "erreur": erreur, "personnes": nombre,
                        "lecture_seule": True},
             "carnet": ETAT.get("carnet", {"regle": bool(ETAT["cfg"].carnet_jeton), "erreur": "", "fiches": 0}),
+            "millesime": ETAT.get("reperes_etat", {"regle": bool(ETAT["cfg"].tag_estimee or ETAT["cfg"].tag_non_datee),
+                                                   "lu": False, "erreur": "", "estimees": 0, "non_datees": 0}),
             "cache": ETAT["cache"].place()}
 
 

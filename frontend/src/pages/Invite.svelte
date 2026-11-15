@@ -3,7 +3,7 @@
   // Ni mot de passe, ni corrections, ni lien vers Immich : la photo phare de chaque étape, et rien d'autre.
   // Deux invités : leur chemin commun (par décennie) ; sans photo ensemble, le chemin de chacun.
   import { onMount } from 'svelte'
-  import { periode, quandDit, foisDit } from '$lib/dates.js'
+  import { ageDit, periode, quandDit, foisDit } from '$lib/dates.js'
   import Album from '$lib/Album.svelte'
   import Croix from '$lib/Croix.svelte'
 
@@ -29,7 +29,6 @@
       .map((c) => ({ ...c, etapes: c.etapes.filter((e) => (tout || !forts || e.temps_fort) && (!choisis.length || choisis.includes(e.qui ?? 'ensemble'))).map((e) => ({ ...e, cote: i++ % 2 ? 'droite' : 'gauche' })) }))
       .filter((c) => c.etapes.length)
   })
-  const ageDit = (a) => (a == null ? '' : a === 0 ? 'avant 1 an' : a === 1 ? 'à 1 an' : `à ${a} ans`)
   // 0.7 : la frise de plusieurs invités, une couleur par invité et celle de Sillage (lavande depuis la 0.10.1) pour les moments ensemble
   const COULEURS = ['#7fb7e6', '#e58fa8', '#8fd1a6', '#e3b556']   // le 4e était lavande : trop proche de « ensemble »
   const couleur = (qui) => (qui === 'ensemble' || qui == null ? 'var(--app)' : COULEURS[qui % COULEURS.length])
@@ -111,7 +110,7 @@
             <ol>
               {#each c.etapes as e (e.cle)}
                 <li class="etape {e.cote}" class:petite={e.nombre === 1 && !e.nom} class:colore={e.qui != null} style:--qui={couleur(e.qui)} use:apparait>
-                  <span class="point" class:fort={e.temps_fort} aria-hidden="true"></span>
+                  <span class="point" class:fort={e.temps_fort} class:vers={e.vers != null} aria-hidden="true"></span>
                   <div class="carte">
                     <button type="button" class="ouvrir" aria-label={'Voir en grand : ' + (e.nom || quandDit(e))} onclick={() => (grande = e)}>
                       <img src={`/api/invite/${encodeURIComponent(jeton)}/vignette/${e.phare}`} alt="" loading="lazy" />
@@ -119,7 +118,7 @@
                     <span class="dit">
                       {#if e.qui != null}<span class="qui">{e.qui === 'ensemble' ? 'Ensemble' : prenom(vu.invites[e.qui])}</span>{/if}
                       <strong class:plume={!!e.nom}>{e.nom || quandDit(e)}</strong>
-                      <small>{e.nom ? quandDit(e) + foisDit(e) : ''}{e.nom && e.age != null ? ' · ' : ''}{ageDit(e.age)}{e.nombre > 1 ? (e.nom || e.age != null ? ' · ' : '') + e.nombre + ' photos' : ''}</small>
+                      <small>{e.nom ? quandDit(e) + foisDit(e) : ''}{e.nom && e.age != null ? ' · ' : ''}{ageDit(e.age, e.vers)}{e.nombre > 1 ? (e.nom || e.age != null ? ' · ' : '') + e.nombre + ' photos' : ''}</small>
                     </span>
                   </div>
                 </li>
@@ -167,6 +166,8 @@
   .point { z-index: 1; position: absolute; left: var(--trait); top: 1.6rem; width: 0.7rem; height: 0.7rem; margin-left: -0.35rem; border-radius: 50%; background: var(--background); border: 2px solid var(--app); }
   .point { border-color: var(--qui, var(--app)); }
   .point.fort { background: var(--qui, var(--app)); border-color: var(--qui, var(--app)); width: 0.95rem; height: 0.95rem; margin-left: -0.475rem; }
+  /* 0.14 : un scan daté par estimation : le point en pointillé */
+  .point.vers { background: var(--background); border-style: dashed; }
   .carte { display: flex; flex-direction: column; width: 100%; max-width: 26rem; overflow: hidden; text-align: left; border: 1px solid var(--border); border-radius: 1.1rem; background: var(--card); transition: border-color 0.2s, transform 0.2s; }
   .ouvrir { display: block; width: 100%; padding: 0; border: 0; background: none; cursor: zoom-in; }
   .petite .ouvrir { width: 4rem; flex: none; }

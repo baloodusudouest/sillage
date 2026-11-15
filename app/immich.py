@@ -62,6 +62,21 @@ class Immich:
             suite = r["assets"].get("nextPage")
             page = int(suite) if suite else 0
 
+    def etiquettes(self) -> list[dict]:
+        """0.14 : tous les tags d'Immich ({id, value}) : pour retrouver ceux que Millésime pose sur les scans."""
+        return self._lire("/tags", "la lecture des tags").json()
+
+    def ids_du_tag(self, tag: str) -> list[str]:
+        """0.14 : les identifiants des photos qui portent ce tag (une recherche, donc une lecture)."""
+        ids, page = [], 1
+        while page:
+            r = self._lire("/search/metadata", "la lecture des photos d'un tag",
+                           corps={"tagIds": [tag], "size": 1000, "page": page}).json()
+            ids += [a["id"] for a in r["assets"]["items"]]
+            suite = r["assets"].get("nextPage")
+            page = int(suite) if suite else 0
+        return ids
+
     def album_de(self, photo: str) -> str:
         """Le nom du premier album qui contient la photo ; vide si elle n'est dans aucun."""
         albums = self._lire("/albums", "la lecture des albums d'une photo", assetId=photo).json()
