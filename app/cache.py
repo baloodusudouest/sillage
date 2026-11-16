@@ -24,6 +24,14 @@ class Cache:
         if self.limite:
             dossier.mkdir(parents=True, exist_ok=True)
 
+    def regler(self, limite_mo: int) -> None:
+        """0.16 : la place se change dans Réglages, sans redémarrer ; plus petite, le dossier est élagué tout de suite."""
+        self.limite = max(0, int(limite_mo)) * 1024 * 1024
+        if self.limite:
+            self.dossier.mkdir(parents=True, exist_ok=True)
+            with self._verrou:
+                self.elaguer()
+
     def _fichiers(self, cle: str):
         return [self.dossier / f"{cle}.{ext}" for ext in TYPES]
 

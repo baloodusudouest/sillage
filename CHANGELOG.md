@@ -1,5 +1,14 @@
 # Journal des versions
 
+## 0.16.0 — 16 novembre 2026
+- **Les réglages d'usage quittent la stack pour l'écran Réglages** : mots des temps forts, dossiers muets, place des vignettes, tag des dates estimées, tag des scans non datés. Ils changent tout de suite, sans redémarrer (chemins et frises des chambres refaits, vignettes élaguées). Gardés dans `/data/reglages.json`.
+- **Reprise une seule fois** : au premier démarrage de la 0.16, chaque réglage prend la valeur de son ancienne variable de la stack (`SILLAGE_MOTS`, `SILLAGE_DOSSIERS_MUETS`, `SILLAGE_CACHE_MO`, `SILLAGE_TAG_ESTIMEE`, `SILLAGE_TAG_NON_DATEE`) si elle est posée ; une ligne au journal du conteneur le dit. Ensuite ces variables ne sont plus lues.
+- **Tag des scans non datés laissé vide** : Sillage le demande à Chambre noire (`/externe/noms`, jeton commun). Connexion dit d'où vient le tag.
+- **Sauvegarde** : `GET /externe/sauvegarde` rend les réglages à l'Anneau (jeton commun seulement ; sans jeton, adresse fermée). Ni variable, ni chemin, ni secret.
+- **Restaurer les réglages** (écran Réglages) : choisir une date, voir ce qui changerait (avant → sauvegardé), confirmer. Anneau injoignable ou rien à restaurer : un message clair.
+- **Anciens noms retirés** : `SILLAGE_PASSWORD` (seul `MAISON_PASSWORD` compte), `SILLAGE_CARNET_JETON` (seul `MAISON_JETON` part vers carnet), `SILLAGE_IMMICH_ADRESSE` et `SILLAGE_IMMICH_PORT` (adresse d'Immich par l'Anneau, sinon même hôte, port 2283). Le jeton de Home Assistant (`SILLAGE_JETON_HA`) ne change pas.
+- Tests : 57 du serveur (sans réseau : faux Anneau, faux Chambre noire), 28 d'écran (Réglages et Restaurer sur PC et iPhone).
+
 ## 0.15.0 — 16 novembre 2026
 - **Variables communes de la maison** (module `app/maison.py` du socle 0.5.0, copié tel quel) :
   - mot de passe : `MAISON_PASSWORD`, repli sur `SILLAGE_PASSWORD` (toujours 12 caractères au moins) ;

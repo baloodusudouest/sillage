@@ -233,6 +233,32 @@ def test_connexion_et_reglages(page):
     from app import __version__
     page.get_by_text(f"Sillage {__version__}").wait_for()
     sans_debordement(page)
+    # 0.16 : les réglages du chemin se changent ici ; un mauvais nombre est refusé avec un message clair
+    playwright.expect(page.locator("#r-non-datee")).to_have_value("Lots/Non datée")
+    page.fill("#r-cache", "beaucoup")
+    page.get_by_role("button", name="Garder").click()
+    page.get_by_text("Place des vignettes : un nombre entier").wait_for()
+    page.fill("#r-cache", "400")
+    page.get_by_role("button", name="Garder").click()
+    page.get_by_text("Gardé. Les chemins").wait_for()
+    sans_debordement(page)
+
+
+def test_016_restaurer_les_reglages(page):
+    """0.16 : choisir une date, voir les différences (avant → sauvegardé), confirmer (faux Anneau sans réseau)."""
+    page.goto(page.base + "/#/reglages")
+    page.get_by_role("button", name="Voir les sauvegardes").click()
+    page.locator("ul[aria-label='Différences avec la sauvegarde']").wait_for()
+    assert page.locator("#r-date option").all_inner_texts() == ["2026-11-15", "2026-11-14"]
+    page.get_by_text("Place des vignettes (Mo)", exact=True).last.wait_for()
+    sans_debordement(page)
+    page.get_by_role("button", name="Restaurer ces réglages").click()
+    page.get_by_role("button", name="Confirmer").click()
+    page.get_by_text("Réglages du 2026-11-15 restaurés.").wait_for()
+    playwright.expect(page.locator("#r-cache")).to_have_value("300")
+    playwright.expect(page.locator("#r-muets")).to_have_value("Fourre-tout")
+    playwright.expect(page.locator("#r-non-datee")).to_have_value("Lots/Non datée")
+    sans_debordement(page)
 
 
 # ------------------------------------------------------------ 0.5 : la page d'un invité

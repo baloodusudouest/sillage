@@ -9,19 +9,16 @@ services:
       - "${PORT_SILLAGE:-8093}:8093"                 # réseau local et Tailscale uniquement
     environment:
       - TZ=Europe/Paris
-      # 0.15 : variables communes de la maison (module app/maison.py) ; les anciennes restent lues en repli
+      # Variables communes de la maison (module app/maison.py)
       - MAISON_PASSWORD=${MAISON_PASSWORD}           # mot de passe commun des applis (12 caractères au moins)
-      # - SILLAGE_PASSWORD=${CARNET_PASSWORD}        # ancien nom, lu en repli tant que MAISON_PASSWORD est absent
-      - MAISON_JETON=${MAISON_JETON:-}               # jeton commun : envoyé à carnet, et lu par l'annuaire de l'Anneau
+      - MAISON_JETON=${MAISON_JETON:-}               # jeton commun : envoyé à carnet, à Chambre noire et à l'Anneau ; ouvre /externe/sauvegarde
       - SILLAGE_IMMICH_URL=http://immich_server:2283 # Immich vu depuis la stack
       - SILLAGE_IMMICH_CLE=${SILLAGE_IMMICH_CLE}     # clé d'API Immich, en lecture seule
-      - SILLAGE_IMMICH_ADRESSE=${SILLAGE_IMMICH_ADRESSE:-}   # repli : l'adresse d'Immich vient d'abord de l'Anneau (tuile « Immich »)
-      - SILLAGE_DOSSIERS_MUETS=${SILLAGE_DOSSIERS_MUETS:-}   # noms de dossier qui ne disent rien, séparés par des virgules
-      - SILLAGE_IMMICH_PORT=${PORT_IMMICH:-2283}         # port d'Immich sur le NAS : sert au lien quand l'adresse ci-dessus est vide
       - SILLAGE_CARNET_URL=http://carnet:8096          # carnet vu depuis la stack
-      - SILLAGE_CARNET_JETON=${SILLAGE_CARNET_JETON:-}   # ancien jeton propre (= CARNET_JETON_SILLAGE), envoyé avant MAISON_JETON tant qu'il est posé
-      - SILLAGE_MOTS=${SILLAGE_MOTS:-}               # mots des temps forts, séparés par des virgules ; vide : la liste par défaut
-      - SILLAGE_TAG_ESTIMEE=${SILLAGE_TAG_ESTIMEE:-Date estimée}   # 0.14 : début des tags d'estimation de Millésime
-      - SILLAGE_TAG_NON_DATEE=${SILLAGE_TAG_NON_DATEE:-}           # 0.14 : tag complet des scans non datés (celui de Millésime) ; vide : pas lu
+      - SILLAGE_JETON_HA=${SILLAGE_JETON_HA:-}       # jeton propre à Home Assistant (/ha/sejour) ; vide : adresse fermée
+      # 0.16 : les réglages d'usage (mots des temps forts, dossiers muets, place des vignettes, tags de Millésime)
+      # se règlent dans l'écran Réglages de Sillage. Ils ont été repris une fois des anciennes variables de la stack
+      # (SILLAGE_MOTS, SILLAGE_DOSSIERS_MUETS, SILLAGE_CACHE_MO, SILLAGE_TAG_ESTIMEE, SILLAGE_TAG_NON_DATEE) au premier
+      # démarrage de la 0.16 ; ces lignes ne servent plus. L'adresse d'Immich pour le navigateur vient de l'Anneau.
     volumes:
-      - ${SILLAGE_DATA_DIR}:/data                    # un seul petit fichier (déconnexion)
+      - ${SILLAGE_DATA_DIR}:/data                    # base de Sillage, réglages, vignettes gardées

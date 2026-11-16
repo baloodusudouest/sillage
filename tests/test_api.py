@@ -23,8 +23,10 @@ def monde(tmp_path):
     faux = FauxImmich()
     main.ETAT.clear()
     main.ETAT.update(cfg=Config(password=MDP, immich_url="http://immich", immich_cle="cle", data=tmp_path,
-                                static=tmp_path / "static", immich_adresse="http://photos.exemple", attente_connexion=False),
-                     immich=Immich("http://immich", "cle", transport=faux.transport()))
+                                static=tmp_path / "static", attente_connexion=False),
+                     immich=Immich("http://immich", "cle", transport=faux.transport()),
+                     # 0.16 : un faux Chambre noire qui n'a rien réglé (aucune demande ne sort vers le réseau)
+                     chambre_noire_transport=httpx.MockTransport(lambda d: httpx.Response(200, json={"regle": False})))
     with TestClient(main.app) as c:
         yield c, faux
 
@@ -67,7 +69,7 @@ def test_le_chemin_de_camille(c):
     assert r["etapes"] == 3 and r["photos"] == 6
     assert r["ecartees"] == {"avant_naissance": 1, "sans_date": 0, "apres_fin": 0, "scans_non_dates": 0}
     assert r["personne"]["fin"] is None and r["personne"]["decede"] is False
-    assert r["immich"] == "http://photos.exemple" and r["immich_port"] == 0
+    assert r["immich"] == "" and r["immich_port"] == 2283           # 0.16 : Anneau muet → même hôte, port 2283
 
 
 def test_ni_corbeille_ni_archive_ni_verrou(c):
@@ -246,7 +248,7 @@ def avec_carnet(reponse):
     def repondre(demande):
         vues.append((demande.method, demande.url.path, demande.headers.get("authorization")))
         return httpx.Response(reponse[0], json=reponse[1])
-    main.ETAT["cfg"] = dataclasses.replace(main.ETAT["cfg"], carnet_url="http://carnet", carnet_jeton="jeton-sillage")
+    main.ETAT["cfg"] = dataclasses.replace(main.ETAT["cfg"], carnet_url="http://carnet", jeton="jeton-sillage")
     main.ETAT["carnet_transport"] = httpx.MockTransport(repondre)
     main.ETAT["personnes"] = None
     return vues
@@ -354,7 +356,7 @@ def test_deux_invites_une_frise_en_couleurs(monde, c):
     assert len({e["cle"] for ch in f["chapitres"] for e in ch["etapes"]}) == f["etapes"]
     # Les hôtes se règlent dans Sillage ; la photo avec l'hôte entre dans la frise de Camille
     assert c.put("/api/reglages", json={"hotes": ["pas-une-personne"]}).status_code == 422
-    assert c.put("/api/reglages", json={"hotes": [HOTE]}).json() == {"hotes": [{"id": HOTE, "nom": "Alex DUPRÉ"}]}
+    assert c.put("/api/reglages", json={"hotes": [HOTE]}).json()["hotes"] == [{"id": HOTE, "nom": "Alex DUPRÉ"}]
     r = client.get(f"/api/invite/{jeton}").json()
     vus = {(e["nom"], e["qui"]) for ch in r["commun"]["chapitres"] for e in ch["etapes"]}
     assert ("Café du port", 0) in vus and not any(n == "Fête du village" for n, _ in vus)
@@ -585,7 +587,6 @@ def test_l_heure_de_la_nuit():
 def avec_tags(faux, non_datee=""):
     """Des scans de Camille : deux datés par Millésime en 1992 (±2), un en 1994 (±1), un qui attend sa date
     (daté du jour du scan, comme dans Immich), et un tag sans rapport. Noms de tags inventés."""
-    from dataclasses import replace
     faux.photos[CAMILLE] += [photo("scan1", "1992-07-01T12:00:00", "Scans/Lot A", visage=0.2),
                              photo("scan2", "1992-07-01T12:00:00", "Scans/Lot A"),
                              photo("scan3", "1994-07-01T12:00:00", "Scans/Lot B"),
@@ -596,7 +597,7 @@ def avec_tags(faux, non_datee=""):
                  "t3": ("Lots/Non datée", [ident("scan4"), ident("scan3")]),   # un scan estimé garde parfois l'ancien tag
                  "t4": ("Date estimée/inconnue", [ident("plage")]),
                  "t5": ("Vacances", [ident("plage")])}
-    main.ETAT["cfg"] = replace(main.ETAT["cfg"], tag_non_datee=non_datee)
+    main.ETAT["reglages"].changer({"tag_non_datee": non_datee})      # 0.16 : réglé dans Réglages
     main.ETAT["reperes"] = None
 
 
@@ -622,7 +623,7 @@ def test_scans_estimes_dits_vers(monde, c):
 
 def test_sans_reglage_le_scan_non_date_reste_dans_le_chemin(monde, c):
     _, faux = monde
-    avec_tags(faux)                                       # SILLAGE_TAG_NON_DATEE vide
+    avec_tags(faux)                                       # tag des non datées vide (et Chambre noire n'en donne pas)
     r = c.get(f"/api/chemin/{CAMILLE}").json()
     assert r["ecartees"]["scans_non_dates"] == 0
     assert ident("scan4") in {p["id"] for e in etapes(r) for p in e["photos"]}
@@ -679,39 +680,47 @@ def test_le_recit_dit_vers_pour_un_scan_estime(monde, c):
     assert "Le 1er juillet 1992, à 5 ans : Été à la mer." in texte              # la vraie photo du même jour garde sa date
 
 
-# ------------------------------------------------------------ 0.15 : variables communes de la maison
+# ------------------------------------------------------------ 0.15 et 0.16 : variables communes, anciens noms retirés
 
-def test_0_15_module_commun_maison(monkeypatch, tmp_path):
-    """Copie non retouchée du module du socle ; MAISON_PASSWORD puis SILLAGE_PASSWORD ; jeton envoyé à carnet :
-    l'ancien d'abord tant qu'il est posé, puis MAISON_JETON. Sillage n'a pas de lecture seule à régler."""
+ANCIENNES = ("SILLAGE_PASSWORD", "SILLAGE_CARNET_JETON", "SILLAGE_IMMICH_ADRESSE", "SILLAGE_IMMICH_PORT", "SILLAGE_MOTS",
+             "SILLAGE_DOSSIERS_MUETS", "SILLAGE_CACHE_MO", "SILLAGE_TAG_ESTIMEE", "SILLAGE_TAG_NON_DATEE")
+
+
+def test_0_16_module_commun_et_mot_de_passe(monkeypatch, tmp_path):
+    """Copie non retouchée du module du socle ; MAISON_PASSWORD seul (l'ancien nom ne suffit plus) ; MAISON_JETON seul
+    vers carnet (l'ancien jeton par paire n'est plus lu) ; Home Assistant garde son jeton. Sillage n'a pas de lecture seule."""
     from app import config as config_mod
     from app import maison
     assert maison.empreinte_calculee() == maison.empreinte_ecrite()
-    for v in ("MAISON_PASSWORD", "MAISON_JETON", "MAISON_JETON_ANCIEN", "SILLAGE_CARNET_JETON", "SILLAGE_JETON_HA"):
+    for v in ("MAISON_PASSWORD", "MAISON_JETON", "MAISON_JETON_ANCIEN", "SILLAGE_JETON_HA", *ANCIENNES):
         monkeypatch.delenv(v, raising=False)
     monkeypatch.setenv("SILLAGE_IMMICH_CLE", "cle")
     monkeypatch.setenv("SILLAGE_DATA", str(tmp_path))
-    monkeypatch.setenv("SILLAGE_PASSWORD", "ancien-mot-de-passe")
-    cfg = config_mod.charger()
-    assert cfg.password == "ancien-mot-de-passe" and cfg.carnet_jeton == ""
-    monkeypatch.setenv("MAISON_PASSWORD", "court")                          # trop court : refusé, même commun
+    monkeypatch.setenv("SILLAGE_PASSWORD", "ancien-mot-de-passe")            # l'ancien nom seul : refus de démarrer
+    with pytest.raises(SystemExit, match="MAISON_PASSWORD est absent ou trop court"):
+        config_mod.charger()
+    monkeypatch.setenv("MAISON_PASSWORD", "court")
     with pytest.raises(SystemExit, match="MAISON_PASSWORD"):
         config_mod.charger()
     monkeypatch.setenv("MAISON_PASSWORD", "mot-de-passe-commun")
-    monkeypatch.setenv("MAISON_JETON", "jeton-commun")
+    monkeypatch.setenv("SILLAGE_CARNET_JETON", "ancien-jeton-de-paire")
     monkeypatch.setenv("SILLAGE_JETON_HA", "jeton-ha")
     cfg = config_mod.charger()
-    assert cfg.password == "mot-de-passe-commun" and cfg.carnet_jeton == "jeton-commun"
-    assert cfg.jeton_ha == "jeton-ha"                                        # Home Assistant garde son jeton propre
-    monkeypatch.setenv("SILLAGE_CARNET_JETON", "jeton-de-sillage")           # transition : l'ancien jeton d'abord
-    assert config_mod.charger().carnet_jeton == "jeton-de-sillage"
+    assert cfg.password == "mot-de-passe-commun" and cfg.jeton == "" and cfg.jeton_ha == "jeton-ha"
+    monkeypatch.setenv("MAISON_JETON", "jeton-commun")
+    assert config_mod.charger().jeton == "jeton-commun"
+    # plus aucune trace des anciens noms dans le code
+    for f in ("config.py", "main.py"):
+        texte = (Path(config_mod.__file__).parent / f).read_text(encoding="utf-8")
+        for nom in ("SILLAGE_PASSWORD", "SILLAGE_CARNET_JETON", "SILLAGE_IMMICH_ADRESSE", "SILLAGE_IMMICH_PORT"):
+            assert nom not in texte
 
 
 def test_0_15_jeton_commun_envoye_a_carnet(c):
-    """Le jeton que Sillage joint à sa demande à carnet est celui de la configuration (MAISON_JETON quand l'ancien est retiré)."""
+    """Le jeton que Sillage joint à sa demande à carnet est MAISON_JETON (Config.jeton)."""
     import dataclasses
     vues = avec_carnet((200, {"personnes": []}))
-    main.ETAT["cfg"] = dataclasses.replace(main.ETAT["cfg"], carnet_jeton="jeton-commun")
+    main.ETAT["cfg"] = dataclasses.replace(main.ETAT["cfg"], jeton="jeton-commun")
     main.ETAT["personnes"] = None
     c.get("/api/personnes")
     assert vues == [("GET", "/sillage/personnes", "Bearer jeton-commun")]
@@ -727,25 +736,196 @@ def test_0_15_la_porte_ha_refuse_le_jeton_commun(monde, monkeypatch):
     assert sejour(client, h, noms=["Camille ROUSSEL"])["trouves"] == ["Camille ROUSSEL"]    # le jeton de HA ouvre toujours
 
 
-def test_0_15_adresse_d_immich_par_l_annuaire(monde, c, monkeypatch):
-    """Lien « Ouvrir dans Immich » : l'annuaire de l'Anneau (tuile « Immich », privée par Tailscale), puis
-    SILLAGE_IMMICH_ADRESSE, puis le port (calculé par l'interface)."""
-    import dataclasses
-
+def test_0_16_adresse_d_immich_par_l_annuaire_seul(monde, c, monkeypatch):
+    """Lien « Ouvrir dans Immich » : l'annuaire de l'Anneau (tuile « Immich », privée par Tailscale) ; sinon vide et
+    l'interface vise le même hôte, port 2283. SILLAGE_IMMICH_ADRESSE et SILLAGE_IMMICH_PORT ne sont plus lus."""
     from app import maison
+    monkeypatch.setenv("SILLAGE_IMMICH_ADRESSE", "http://ancienne.exemple")
+    monkeypatch.setenv("SILLAGE_IMMICH_PORT", "9999")
     services = [{"nom": "Immich", "locale": "http://nas.exemple:2283/", "privee": "https://nas.exemple.ts.net:2283"}]
     monkeypatch.setattr(main, "ANNUAIRE", maison.Annuaire(url="http://anneau", jeton="j", lire=lambda: services))
-    r = c.get(f"/api/chemin/{CAMILLE}").json()
-    assert r["immich"] == "http://nas.exemple:2283"                                       # réseau local : l'adresse locale
+    assert c.get(f"/api/chemin/{CAMILLE}").json()["immich"] == "http://nas.exemple:2283"
     r = c.get(f"/api/chemin/{CAMILLE}", headers={"host": "nas.exemple.ts.net:8093"}).json()
-    assert r["immich"] == "https://nas.exemple.ts.net:2283"                               # Tailscale : l'adresse privée
-    # L'Anneau ne connaît pas la tuile : SILLAGE_IMMICH_ADRESSE
+    assert r["immich"] == "https://nas.exemple.ts.net:2283"
     monkeypatch.setattr(main, "ANNUAIRE", maison.Annuaire(url="http://anneau", jeton="j", lire=lambda: []))
-    assert c.get(f"/api/chemin/{CAMILLE}").json()["immich"] == "http://photos.exemple"
-    # L'Anneau injoignable et pas d'adresse réglée : vide, l'interface calcule avec le port
+    r = c.get(f"/api/chemin/{CAMILLE}").json()
+    assert (r["immich"], r["immich_port"]) == ("", 2283)
+
     def injoignable():
         raise OSError("refusé")
     monkeypatch.setattr(main, "ANNUAIRE", maison.Annuaire(url="http://anneau", jeton="j", lire=injoignable))
-    main.ETAT["cfg"] = dataclasses.replace(main.ETAT["cfg"], immich_adresse="", immich_port=2283)
     r = c.get(f"/api/chemin/{CAMILLE}").json()
     assert (r["immich"], r["immich_port"]) == ("", 2283)
+
+
+# ------------------------------------------------------------ 0.16 : réglages dans l'appli, sauvegarde, restauration
+
+def demarrer(tmp_path, faux=None):
+    """Un Sillage neuf sur le dossier `tmp_path` (le cycle de démarrage lit reglages.json, ou reprend les variables)."""
+    faux = faux or FauxImmich()
+    main.ETAT.clear()
+    main.ETAT.update(cfg=Config(password=MDP, immich_url="http://immich", immich_cle="cle", data=tmp_path,
+                                static=tmp_path / "static", attente_connexion=False),
+                     immich=Immich("http://immich", "cle", transport=faux.transport()),
+                     chambre_noire_transport=httpx.MockTransport(lambda d: httpx.Response(200, json={"regle": False})))
+    return TestClient(main.app)
+
+
+def test_0_16_reglages_repris_une_fois_des_anciennes_variables(monkeypatch, tmp_path):
+    monkeypatch.setenv("SILLAGE_MOTS", "kermesse, mariage")
+    monkeypatch.setenv("SILLAGE_DOSSIERS_MUETS", "Fourre-tout,Divers")
+    monkeypatch.setenv("SILLAGE_CACHE_MO", "50")
+    monkeypatch.setenv("SILLAGE_TAG_NON_DATEE", "Lots/Non datée")
+    monkeypatch.delenv("SILLAGE_TAG_ESTIMEE", raising=False)
+    with demarrer(tmp_path) as c:
+        assert c.post("/api/connexion", json={"mot_de_passe": MDP}).status_code == 200
+        r = c.get("/api/reglages").json()
+        assert r == {"mots": ["kermesse", "mariage"], "dossiers_muets": ["Fourre-tout", "Divers"], "cache_mo": 50,
+                     "tag_estimee": "Date estimée", "tag_non_datee": "Lots/Non datée", "hotes": []}
+        assert sorted(main.ETAT["reglages"].repris) == ["cache_mo", "dossiers_muets", "mots", "tag_non_datee"]
+        assert main.ETAT["cache"].limite == 50 * 1024 * 1024
+        assert c.put("/api/reglages", json={"cache_mo": 80}).json()["cache_mo"] == 80
+    # Second démarrage : les variables (même changées) ne sont plus lues ; Réglages fait foi
+    monkeypatch.setenv("SILLAGE_MOTS", "autre")
+    monkeypatch.setenv("SILLAGE_CACHE_MO", "10")
+    with demarrer(tmp_path) as c:
+        c.post("/api/connexion", json={"mot_de_passe": MDP})
+        r = c.get("/api/reglages").json()
+        assert r["mots"] == ["kermesse", "mariage"] and r["cache_mo"] == 80 and main.ETAT["reglages"].repris == []
+
+
+def test_0_16_regler_sans_redemarrer(monde, c):
+    _, faux = monde
+    avec_tags(faux)                                                   # tag des non datées vide
+    assert c.get("/api/reglages").status_code == 200
+    r = c.get(f"/api/chemin/{CAMILLE}").json()
+    assert next(e for e in etapes(r) if e["nom"] == "Baptême de Camille")["temps_fort"]
+    # Les mots des temps forts changent tout de suite
+    assert c.put("/api/reglages", json={"mots": "anniversaire, kermesse"}).json()["mots"] == ["anniversaire", "kermesse"]
+    r = c.get(f"/api/chemin/{CAMILLE}").json()
+    assert not next(e for e in etapes(r) if e["nom"] == "Baptême de Camille")["temps_fort"]
+    # La place des vignettes : 0 coupe le cache
+    assert c.put("/api/reglages", json={"cache_mo": 0}).json()["cache_mo"] == 0
+    assert main.ETAT["cache"].limite == 0
+    # Le tag des non datées, changé dans Réglages, est relu au prochain chemin
+    assert c.get(f"/api/chemin/{CAMILLE}").json()["ecartees"]["scans_non_dates"] == 0
+    c.put("/api/reglages", json={"tag_non_datee": "Lots/Non datée"})
+    assert c.get(f"/api/chemin/{CAMILLE}").json()["ecartees"]["scans_non_dates"] == 1
+
+
+def test_0_16_mauvais_type_400(c):
+    avant = c.get("/api/reglages").json()
+    for corps in ({"cache_mo": "beaucoup"}, {"cache_mo": -5}, {"cache_mo": True}, {"cache_mo": 1.5},
+                  {"mots": 12}, {"mots": {"a": 1}}, {"tag_estimee": ["x"]}, {"tag_non_datee": 3}, {"hotes": "quelqu'un"},
+                  {"mots": ["ok"], "cache_mo": "non"}):
+        r = c.put("/api/reglages", json=corps)
+        assert r.status_code == 400 and r.json()["detail"], corps
+    assert c.get("/api/reglages").json() == avant                     # rien n'a changé, même en partie
+    assert c.put("/api/reglages", json={"inconnue": 1}).json() == avant
+
+
+def test_0_16_tag_des_non_datees_demande_a_chambre_noire(monde, c):
+    import dataclasses
+    _, faux = monde
+    avec_tags(faux)                                                   # Réglages : tag des non datées vide
+    vues = []
+
+    def chambre_noire(d):
+        vues.append((d.url.path, d.headers.get("authorization")))
+        return httpx.Response(200, json={"regle": True, "version": "0.6.0", "libelle": "Lots",
+                                         "album_non_datees": "Non datées Lots", "tag_non_datee": "Lots/Non datée"})
+    main.ETAT["chambre_noire_transport"] = httpx.MockTransport(chambre_noire)
+    # Sans jeton commun : rien n'est demandé
+    assert c.get(f"/api/chemin/{CAMILLE}").json()["ecartees"]["scans_non_dates"] == 0 and vues == []
+    main.ETAT["cfg"] = dataclasses.replace(main.ETAT["cfg"], jeton="jeton-commun")
+    main.ETAT["reperes"] = None
+    assert c.get(f"/api/chemin/{CAMILLE}").json()["ecartees"]["scans_non_dates"] == 1
+    assert vues == [("/externe/noms", "Bearer jeton-commun")]
+    m = c.get("/api/services").json()["millesime"]
+    assert (m["source"], m["tag_non_datee"], m["erreur"]) == ("chambre-noire", "Lots/Non datée", "")
+    # Chambre noire refuse ou se tait : pas de tag non daté, la raison est dite
+    main.ETAT["chambre_noire_transport"] = httpx.MockTransport(lambda d: httpx.Response(401, json={}))
+    main.ETAT["reperes"] = None
+    assert c.get(f"/api/chemin/{CAMILLE}").json()["ecartees"]["scans_non_dates"] == 0
+    assert "refuse" in c.get("/api/services").json()["millesime"]["chambre_noire"]
+    # Réglé dans Réglages : Réglages passe devant Chambre noire
+    c.put("/api/reglages", json={"tag_non_datee": "Lots/Non datée"})
+    assert c.get(f"/api/chemin/{CAMILLE}").json()["ecartees"]["scans_non_dates"] == 1
+    assert c.get("/api/services").json()["millesime"]["source"] == "reglages"
+
+
+def test_0_16_externe_sauvegarde(monde, monkeypatch):
+    client, _ = monde                                                 # pas de session : /externe/ ne passe pas par elle
+    for v in ("MAISON_JETON", "MAISON_JETON_ANCIEN"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("SILLAGE_CARNET_JETON", "ancien-jeton-de-paire")
+    assert client.get("/externe/sauvegarde").status_code == 404        # jeton commun vide : porte fermée
+    monkeypatch.setenv("MAISON_JETON", "jeton-commun-essai")
+    assert client.get("/externe/sauvegarde").status_code == 401
+    assert client.get("/externe/sauvegarde", headers={"Authorization": "Bearer ancien-jeton-de-paire"}).status_code == 401
+    assert client.get("/externe/sauvegarde", headers={"Authorization": "Bearer jeton-ha"}).status_code == 401
+    r = client.get("/externe/sauvegarde", headers={"Authorization": "Bearer jeton-commun-essai"})
+    assert r.status_code == 200
+    j = r.json()
+    assert j["contrat"] == 1 and j["appli"] == "sillage" and j["version"] == main.__version__
+    assert set(j["reglages"]) == {"mots", "dossiers_muets", "cache_mo", "tag_estimee", "tag_non_datee", "hotes"}
+    assert not set(j["reglages"]) & set(main.EXCLUS)
+    texte = r.text
+    for secret in ("jeton-commun-essai", "ancien-jeton-de-paire", MDP, "SILLAGE_", "MAISON_", str(main.ETAT["cfg"].data)):
+        assert secret not in texte
+    assert client.get("/health").json()["ok"] is True                  # /health inchangé
+
+
+def faux_anneau(sauvegardes):
+    """Un faux Anneau : {date: réglages} ; None = injoignable."""
+    from urllib.parse import parse_qs, urlparse
+    demandes = []
+
+    def lire(adresse, jeton):
+        demandes.append(adresse)
+        if sauvegardes is None:
+            raise OSError("Anneau injoignable")
+        assert urlparse(adresse).path == "/externe/sauvegardes/sillage"
+        le = parse_qs(urlparse(adresse).query).get("le", [""])[0]
+        if not le:
+            return {"dates": sorted(sauvegardes, reverse=True)}
+        if le not in sauvegardes:
+            import urllib.error
+            raise urllib.error.HTTPError(adresse, 404, "absente", {}, None)
+        return {"le": le, "version": "0.16.0", "reglages": sauvegardes[le]}
+    main.ETAT["lire_sauvegarde"] = lire
+    return demandes
+
+
+def test_0_16_restaurer(monde, c):
+    client, faux = monde
+    faux.personnes.append({"id": HOTE, "name": "Alex DUPRÉ", "birthDate": None, "isHidden": False})
+    faux_anneau({"2026-11-15": {"mots": ["kermesse"], "cache_mo": 200, "tag_estimee": "Date estimée",
+                                "hotes": [{"id": HOTE, "nom": "Alex DUPRÉ"}], "inconnue": 1, "jeton": "x"},
+                 "2026-11-14": {"cache_mo": 500}})
+    assert c.get("/api/restaurer").json() == {"dates": ["2026-11-15", "2026-11-14"]}
+    d = c.get("/api/restaurer?le=2026-11-15").json()
+    assert d["le"] == "2026-11-15" and d["version"] == "0.16.0"
+    assert {x["cle"]: (x["actuel"], x["sauve"]) for x in d["differences"]} == {
+        "cache_mo": (500, 200), "mots": (list(calcul.MOTS), ["kermesse"]), "hotes": ([], [{"id": HOTE, "nom": "Alex DUPRÉ"}])}
+    assert c.get("/api/restaurer?le=2026-11-14").json()["differences"] == []
+    r = c.post("/api/restaurer", json={"le": "2026-11-15"}).json()
+    assert r["mots"] == ["kermesse"] and r["cache_mo"] == 200 and r["hotes"] == [{"id": HOTE, "nom": "Alex DUPRÉ"}]
+    assert "inconnue" not in r and "jeton" not in r
+    assert main.ETAT["cache"].limite == 200 * 1024 * 1024
+    assert c.get("/api/restaurer?le=2026-11-15").json()["differences"] == []
+    # Erreurs claires, jamais une page cassée
+    assert c.get("/api/restaurer?le=2026-11-01").status_code == 404
+    assert c.get("/api/restaurer?le=hier").status_code == 400
+    assert c.post("/api/restaurer", json={"le": ""}).status_code == 400
+    faux_anneau({})
+    r = c.get("/api/restaurer")
+    assert r.status_code == 404 and "aucune sauvegarde" in r.json()["detail"]
+    faux_anneau(None)
+    for r in (c.get("/api/restaurer"), c.get("/api/restaurer?le=2026-11-15"), c.post("/api/restaurer", json={"le": "2026-11-15"})):
+        assert r.status_code == 503 and "L'Anneau ne répond pas" in r.json()["detail"]
+    # Derrière la session
+    client.cookies.clear()
+    assert client.get("/api/restaurer").status_code == 401
+    assert client.post("/api/restaurer", json={"le": "2026-11-15"}).status_code == 401
+    assert client.get("/api/reglages").status_code == 401

@@ -2,10 +2,15 @@
 
 Routes : /health (publique), /api/session, /api/connexion, /api/deconnexion, /api/personnes,
 /api/chemin/{personne} (et /marque), /api/recit/{personne}, /api/portrait/{personne},
-/api/vignette/{photo}, /api/services, puis l'interface.
+/api/vignette/{photo}, /api/services, /api/reglages, /api/restaurer, /externe/sauvegarde (jeton commun), puis l'interface.
+
+0.16 : les réglages d'usage (mots des temps forts, dossiers muets, place des vignettes, tags de Millésime) se changent
+dans l'écran Réglages, sans redémarrer ; leur ancienne variable n'est lue qu'au premier démarrage. L'Anneau collecte
+les réglages chaque nuit (/externe/sauvegarde) ; « Restaurer les réglages » en relit une sauvegarde. Anciens noms
+retirés : MAISON_PASSWORD seul, MAISON_JETON seul vers carnet, adresse d'Immich par l'annuaire seul (puis même hôte, port 2283).
 
 0.14 : les scans datés par Millésime (tag « Date estimée/AAAA ±N ») entrent dans le chemin, dits « vers 1975 » ;
-ceux qui attendent une date (SILLAGE_TAG_NON_DATEE) restent à part, comptés. La date de décès d'une personne
+ceux qui attendent une date (tag des non datées) restent à part, comptés. La date de décès d'une personne
 vient de carnet seulement (qui la tient de Treemich, d'iCloud ou de sa fiche) : Sillage ne la saisit pas (0.14.1).
 
 0.15 : variables communes de la maison (app/maison.py, copie du socle) : MAISON_PASSWORD, jeton commun envoyé à carnet,
@@ -36,7 +41,7 @@ from . import __version__, chemin as calcul, maison, recit as recits
 from .base import SORTES, Base
 from .cache import Cache
 from .auth import COMMUN, DUREE, Sessions
-from .config import APPLI, Config, charger
+from .config import APPLI, IMMICH_PORT, REGLAGES, VARIABLES, Config, charger
 from .immich import ErreurImmich, Immich
 
 ETAT: dict = {}
@@ -47,13 +52,22 @@ UUID = re.compile(r"^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
 VERROU = threading.Lock()
 log = logging.getLogger("sillage")
 ANNUAIRE = maison.Annuaire()      # 0.15 : adresses des services lues dans l'Anneau (jeton commun), gardées dix minutes
+# 0.16 : réglages qui ne sortent jamais par /externe/sauvegarde (aucun aujourd'hui : rien de secret dans ceux de Sillage ;
+# maison.est_secret écarte de toute façon un nom qui ressemble à un secret)
+EXCLUS: tuple[str, ...] = ()
+JOUR = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
 def adresse_immich(hote: str = "") -> str:
-    """0.15 : adresse d'Immich pour le navigateur (lien « Ouvrir dans Immich »), dans cet ordre : l'annuaire de
-    l'Anneau (tuile « Immich », adresse privée si la page vient de Tailscale), puis SILLAGE_IMMICH_ADRESSE. Les deux
-    vides : l'interface calcule l'adresse sur le même hôte avec SILLAGE_IMMICH_PORT (`immich_port`)."""
-    return ANNUAIRE.adresse("Immich", prive=maison.est_prive(hote), repli=ETAT["cfg"].immich_adresse)
+    """Adresse d'Immich pour le navigateur (lien « Ouvrir dans Immich ») : l'annuaire de l'Anneau (tuile « Immich »,
+    adresse privée si la page vient de Tailscale). 0.16 : plus de variable de repli ; vide, l'interface vise le même
+    hôte que Sillage sur le port d'Immich (`immich_port`, 2283)."""
+    return ANNUAIRE.adresse("Immich", prive=maison.est_prive(hote))
+
+
+def _reglage(cle: str):
+    """0.16 : la valeur actuelle d'un réglage d'usage (écran Réglages)."""
+    return ETAT["reglages"].get(cle)
 
 
 def _fichier_generation(cfg: Config) -> Path:
@@ -72,9 +86,14 @@ async def cycle(app: FastAPI):
     cfg = ETAT.get("cfg") or charger()
     cfg.data.mkdir(parents=True, exist_ok=True)
     ETAT.setdefault("immich", Immich(cfg.immich_url, cfg.immich_cle))
+    # 0.16 : réglages d'usage ; au premier démarrage, chaque ancienne variable posée est reprise une fois
+    reglages_ = maison.Reglages(cfg.data / "reglages.json", REGLAGES, VARIABLES)
+    for k in reglages_.repris:
+        log.warning("Réglage « %s » repris de %s (première fois) ; il se change désormais dans Réglages.", k, VARIABLES[k])
     ETAT.update(cfg=cfg, sessions=Sessions(APPLI, cfg.password, _lire_generation(cfg)),
                 personnes=None, lues={}, albums={}, connues={}, derniere_lecture=None, toutes=None, invites={}, reperes=None,
-                base=Base(cfg.data / "sillage.db"), cache=Cache(cfg.data / "vignettes", cfg.cache_mo),
+                reglages=reglages_, base=Base(cfg.data / "sillage.db"),
+                cache=Cache(cfg.data / "vignettes", reglages_.get("cache_mo")),
                 fond=[], verrous={}, nuit=None)
     # Les invitations posées sans frise (base d'avant la 0.13, arrêt pendant une préparation) sont préparées au démarrage
     manquantes = [i["jeton"] for i in ETAT["base"].invitations() if i["jeton"] not in ETAT["base"].preparees()]
@@ -158,11 +177,11 @@ def _de_carnet() -> tuple[dict[str, dict], str]:
     """Les fiches de carnet liées à une personne d'Immich : identifiant Immich → fiche. Une lecture seule,
     avec le jeton de Sillage. Rend aussi la raison quand carnet ne répond pas (alors : Immich seul)."""
     cfg = ETAT["cfg"]
-    if not cfg.carnet_jeton:
+    if not cfg.jeton:
         return {}, ""
     try:
         with httpx.Client(timeout=10, transport=ETAT.get("carnet_transport")) as client:
-            r = client.get(cfg.carnet_url + "/sillage/personnes", headers={"Authorization": f"Bearer {cfg.carnet_jeton}"})
+            r = client.get(cfg.carnet_url + "/sillage/personnes", headers={"Authorization": f"Bearer {cfg.jeton}"})
         if r.status_code == 401:
             return {}, "carnet refuse le jeton de Sillage."
         r.raise_for_status()
@@ -190,7 +209,7 @@ def _personnes(frais: bool = False) -> dict[str, dict]:
         elif (p.get("name") or "").strip() and not p.get("isHidden"):
             liste[p["id"]] = {**p, "carnet": False}
     ETAT["personnes"] = (time.monotonic(), liste)
-    ETAT["carnet"] = {"regle": bool(ETAT["cfg"].carnet_jeton), "erreur": erreur, "fiches": len(fiches)}
+    ETAT["carnet"] = {"regle": bool(ETAT["cfg"].jeton), "erreur": erreur, "fiches": len(fiches)}
     ETAT["derniere_lecture"] = time.time()
     return liste
 
@@ -202,30 +221,57 @@ def _fin(fiche: dict) -> dict:
     return {"fin": de_carnet.isoformat(), "fin_source": "carnet"} if de_carnet else {}
 
 
+def _tag_de_chambre_noire() -> tuple[str, str]:
+    """0.16 : le tag des scans non datés que pose Chambre noire (GET /externe/noms, jeton commun), quand Réglages le
+    laisse vide. Rend (tag, raison si Chambre noire ne le donne pas) ; sans jeton commun, rien n'est demandé."""
+    cfg = ETAT["cfg"]
+    if not cfg.jeton:
+        return "", ""
+    try:
+        with httpx.Client(timeout=5, transport=ETAT.get("chambre_noire_transport")) as client:
+            r = client.get(cfg.chambre_noire_url + "/externe/noms", headers={"Authorization": f"Bearer {cfg.jeton}"})
+        if r.status_code in (401, 404):
+            return "", "Chambre noire refuse le jeton commun."
+        r.raise_for_status()
+        j = r.json()
+        return (str(j.get("tag_non_datee") or "").strip() if j.get("regle") else ""), ""
+    except (httpx.HTTPError, ValueError, AttributeError) as exc:
+        log.warning("Chambre noire ne répond pas : %s", exc.__class__.__name__)
+        return "", "Chambre noire ne répond pas."
+
+
 def _reperes(frais: bool = False) -> tuple[dict[str, tuple[int, int]], set[str]]:
     """0.14 : les scans datés par Millésime (photo → (année, marge)) et ceux qui attendent une date, lus par leurs
-    tags et gardés dix minutes. Sans droit de lire les tags, le chemin se fait sans eux (Connexion le dit)."""
-    cfg, garde_ = ETAT["cfg"], ETAT.get("reperes")
+    tags et gardés dix minutes. Sans droit de lire les tags, le chemin se fait sans eux (Connexion le dit).
+    0.16 : les deux tags viennent de Réglages ; celui des non datées vide, il est demandé à Chambre noire."""
+    garde_ = ETAT.get("reperes")
     if garde_ and not frais and time.monotonic() - garde_[0] < MEMOIRE:
         return garde_[1], garde_[2]
+    tag_estimee = str(_reglage("tag_estimee") or "").strip().rstrip("/")
+    tag_non_datee, source, raison = str(_reglage("tag_non_datee") or "").strip(), "reglages", ""
+    if not tag_non_datee:
+        tag_non_datee, raison = _tag_de_chambre_noire()
+        source = "chambre-noire" if tag_non_datee else ""
     estimees: dict[str, tuple[int, int]] = {}
     non_datees: set[str] = set()
     etat = {"lu": False, "erreur": "", "estimees": 0, "non_datees": 0,
-            "regle": bool(cfg.tag_estimee or cfg.tag_non_datee)}
+            "regle": bool(tag_estimee or tag_non_datee), "tag_non_datee": tag_non_datee, "source": source,
+            "chambre_noire": raison}
     if etat["regle"]:
         try:
             tags = ETAT["immich"].etiquettes()
             for t in tags:
                 valeur = t.get("value") or ""
-                trouve = calcul.estimation(valeur, cfg.tag_estimee)
+                trouve = calcul.estimation(valeur, tag_estimee)
                 if trouve:
                     for i in ETAT["immich"].ids_du_tag(t["id"]):
                         estimees[i] = trouve
-                elif cfg.tag_non_datee and valeur == cfg.tag_non_datee:
+                elif tag_non_datee and valeur == tag_non_datee:
                     non_datees.update(ETAT["immich"].ids_du_tag(t["id"]))
             etat.update(lu=True, estimees=len(estimees), non_datees=len(non_datees - set(estimees)))
-            if cfg.tag_non_datee and not any((t.get("value") or "") == cfg.tag_non_datee for t in tags):
-                etat["erreur"] = "Le tag des scans non datés réglé dans SILLAGE_TAG_NON_DATEE est introuvable dans Immich."
+            if tag_non_datee and not any((t.get("value") or "") == tag_non_datee for t in tags):
+                d_ou = "réglé dans Réglages" if source == "reglages" else "donné par Chambre noire"
+                etat["erreur"] = f"Le tag des scans non datés {d_ou} est introuvable dans Immich."
         except ErreurImmich as exc:
             log.warning("Tags illisibles : %s", exc)
             etat["erreur"] = str(exc)
@@ -248,6 +294,14 @@ def personnes(frais: bool = False):
     par_carnet = any(p["carnet"] for p in sortie)
     return {"personnes": sorted(sortie, key=lambda p: calcul._plat(p["nom"])), "par_carnet": par_carnet,
             "carnet": ETAT.get("carnet", {})}
+
+
+def _mots() -> tuple[str, ...]:
+    return tuple(m.strip().lower() for m in _reglage("mots") if m.strip())
+
+
+def _muets() -> tuple[str, ...]:
+    return tuple(m.strip() for m in _reglage("dossiers_muets") if m.strip())
 
 
 def _noms_d_albums(photos: list[str]) -> dict[str, str]:
@@ -277,10 +331,10 @@ def _chemin(personne: str, frais: bool = False, hote: str = "") -> dict:
             ETAT["lues"][personne] = garde_
             ETAT["connues"].update({p["id"]: p.get("checksum") or "" for p in garde_[1] if calcul.visible(p)})
     estimees, non_datees = _reperes()
-    resultat = calcul.calculer(fiche, garde_[1], _noms_d_albums, ETAT["cfg"].mots, ETAT["base"].marques(personne), ETAT["cfg"].muets,
+    resultat = calcul.calculer(fiche, garde_[1], _noms_d_albums, _mots(), ETAT["base"].marques(personne), _muets(),
                                estimees=estimees, non_datees=non_datees)
-    resultat["immich"] = adresse_immich(hote)                    # 0.15 : annuaire, puis SILLAGE_IMMICH_ADRESSE
-    resultat["immich_port"] = ETAT["cfg"].immich_port              # dernier repli, calculé par l'interface
+    resultat["immich"] = adresse_immich(hote)                    # annuaire de l'Anneau
+    resultat["immich_port"] = IMMICH_PORT                          # 0.16 : repli sans variable, calculé par l'interface
     return resultat
 
 
@@ -412,7 +466,7 @@ def _personnes_sur(photo: dict) -> set[str]:
     return {x["id"] for x in photo.get("people") or [] if x.get("id")}
 
 
-def _ensemble(gens: list[dict], fiches: dict, lire_marques, cfg, photos_etapes: dict | None = None) -> dict | None:
+def _ensemble(gens: list[dict], fiches: dict, lire_marques, photos_etapes: dict | None = None) -> dict | None:
     """0.7 : la frise de plusieurs invités. Les moments communs (photos où ils sont tous), et pour chacun ses photos
     seul ou avec les hôtes de la maison (réglage « hôtes ») : une photo où il y a quelqu'un d'autre n'est pas prise.
     Chaque étape dit à qui elle est (`qui` : « ensemble » ou le rang de l'invité), par décennie du calendrier."""
@@ -434,7 +488,7 @@ def _ensemble(gens: list[dict], fiches: dict, lire_marques, cfg, photos_etapes: 
         if not photos:
             continue
         estimees, non_datees = _reperes()
-        for ch in _pour_invite(calcul.calculer(fiche, photos, _noms_d_albums, cfg.mots, marques, cfg.muets,
+        for ch in _pour_invite(calcul.calculer(fiche, photos, _noms_d_albums, _mots(), marques, _muets(),
                                                decennies=True, estimees=estimees, non_datees=non_datees), photos_etapes)["chapitres"]:
             dest = chapitres.setdefault(ch["cle"], {"cle": ch["cle"], "titre": ch["titre"], "etapes": []})
             dest["etapes"] += [{**e, "cle": f"{qui}-{e['cle']}", "qui": qui} for e in ch["etapes"]]
@@ -453,16 +507,15 @@ def _calculer(inv: dict) -> dict:
     gens = [p for p in inv["personnes"] if p["id"]]
     fiches = {p["id"]: p for p in _toutes()}
     lire_marques = ETAT["base"].marques
-    cfg = ETAT["cfg"]
     commun, chacun, photos_etapes = None, [], {}
     if len(gens) > 1:
-        commun = _ensemble(gens, fiches, lire_marques, cfg, photos_etapes)
+        commun = _ensemble(gens, fiches, lire_marques, photos_etapes)
     elif gens:
         g = gens[0]
         fiche = {**fiches.get(g["id"], {"id": g["id"]}), "name": g["nom"]}
         estimees, non_datees = _reperes()
-        c = _pour_invite(calcul.calculer(fiche, ETAT["immich"].photos_de(g["id"]), _noms_d_albums, cfg.mots,
-                                         lire_marques(g["id"]), cfg.muets, estimees=estimees, non_datees=non_datees), photos_etapes)
+        c = _pour_invite(calcul.calculer(fiche, ETAT["immich"].photos_de(g["id"]), _noms_d_albums, _mots(),
+                                         lire_marques(g["id"]), _muets(), estimees=estimees, non_datees=non_datees), photos_etapes)
         chacun = [c] if c["etapes"] else []
     resultat = {"invites": [p["nom"] for p in inv["personnes"]], "commun": commun, "chacun": chacun,
                 "accueil": commun is None and not chacun}
@@ -576,21 +629,118 @@ def _invitation(jeton: str) -> dict:
     return vue
 
 
+# ================================================================ réglages, sauvegarde et restauration (0.16)
+
+def _tous_reglages() -> dict:
+    """Les réglages d'usage : ceux du fichier reglages.json, et les hôtes de la maison (0.7, gardés dans la base)."""
+    return {**ETAT["reglages"].tout(), "hotes": ETAT["base"].reglage("hotes", [])}
+
+
+def _hotes_valides(valeur) -> list[dict]:
+    """Les hôtes demandés (identifiants de personnes d'Immich), avec leur nom ; refuse un mauvais type ou un inconnu."""
+    if not isinstance(valeur, list):
+        raise HTTPException(400, "Hôtes : une liste d'identifiants de personnes est attendue.")
+    voulus = [str(i.get("id") if isinstance(i, dict) else i) for i in valeur][:6]
+    connues = _personnes()
+    if any(i not in connues for i in voulus):
+        raise HTTPException(422, "Personne inconnue d'Immich.")
+    return [{"id": i, "nom": connues[i]["name"].strip()} for i in dict.fromkeys(voulus)]
+
+
+def _changer(valeurs: dict) -> list[str]:
+    """Change des réglages (écran ou restauration) et en tire les effets sans redémarrer. Rend les clés changées.
+    Mauvais type → HTTPException 400, rien n'est changé."""
+    avant = _tous_reglages()
+    hotes = _hotes_valides(valeurs["hotes"]) if "hotes" in valeurs else None
+    autres = {k: v for k, v in valeurs.items() if k in REGLAGES}
+    if "cache_mo" in autres and (isinstance(autres["cache_mo"], bool) or not isinstance(autres["cache_mo"], (int, str))
+                                 or not str(autres["cache_mo"]).strip().isdigit()):
+        raise HTTPException(400, "Place des vignettes : un nombre entier de Mo, 0 ou plus, est attendu.")
+    for k in ("tag_estimee", "tag_non_datee"):
+        if k in autres and not isinstance(autres[k], str):
+            raise HTTPException(400, "Tag : un texte est attendu.")
+    try:
+        ETAT["reglages"].changer(autres)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(400, f"Réglage refusé : {exc}.")
+    if hotes is not None:
+        ETAT["base"].poser_reglage("hotes", hotes)
+    apres = _tous_reglages()
+    changes = [k for k in apres if apres[k] != avant.get(k)]
+    if "cache_mo" in changes:
+        ETAT["cache"].regler(apres["cache_mo"])
+    if {"tag_estimee", "tag_non_datee"} & set(changes):
+        ETAT["reperes"] = None                       # les tags sont relus au prochain chemin
+    if set(changes) - {"cache_mo"}:
+        _oublier([i["jeton"] for i in ETAT["base"].invitations()])   # les frises des chambres sont refaites
+    return changes
+
+
 @app.get("/api/reglages")
 def reglages():
-    """0.7 : les hôtes de la maison, choisis parmi les personnes d'Immich (frise des invités)."""
-    return {"hotes": ETAT["base"].reglage("hotes", [])}
+    """Les réglages d'usage de Sillage (0.7 : les hôtes ; 0.16 : mots, dossiers muets, vignettes, tags de Millésime)."""
+    return _tous_reglages()
 
 
 @app.put("/api/reglages")
 def regler(corps: dict = Body(...)):
-    connues = _personnes()
-    voulus = [str(i) for i in (corps.get("hotes") or [])][:6]
-    inconnus = [i for i in voulus if i not in connues]
-    if inconnus:
-        raise HTTPException(422, "Personne inconnue d'Immich.")
-    ETAT["base"].poser_reglage("hotes", [{"id": i, "nom": connues[i]["name"].strip()} for i in dict.fromkeys(voulus)])
-    _oublier([i["jeton"] for i in ETAT["base"].invitations()])   # les frises des chambres sont refaites avec les nouveaux hôtes
+    if not isinstance(corps, dict):
+        raise HTTPException(400, "Un objet de réglages est attendu.")
+    for k in _changer(corps):
+        log.info("Réglage « %s » changé dans Réglages.", k)
+    return reglages()
+
+
+@app.get("/externe/sauvegarde")
+def sauvegarde(request: Request):
+    """0.16 : les réglages d'usage, collectés chaque nuit par l'Anneau. Jeton commun seulement ; aucun : porte fermée.
+    Jamais de variable, de chemin ni de secret : rien que les réglages et la version."""
+    acceptes = maison.jetons()
+    if not acceptes:
+        raise HTTPException(404, "Adresse fermée : MAISON_JETON n'est pas posé.")
+    if not maison.jeton_valide(maison.jeton_propose(request.headers), acceptes):
+        raise HTTPException(401, "Jeton refusé.")
+    return maison.sauvegarde(APPLI, __version__, _tous_reglages(), exclus=EXCLUS)
+
+
+def _chez_l_anneau(le: str = "") -> dict:
+    """Une demande de sauvegarde à l'Anneau ; une panne devient un message clair (503), un manque un 404."""
+    try:
+        r = maison.lire_sauvegarde(APPLI, le, lire=ETAT.get("lire_sauvegarde"))
+    except Exception as exc:                         # noqa: BLE001 — l'Anneau ne doit rien casser ici
+        if getattr(exc, "code", None) == 404:
+            raise HTTPException(404, "L'Anneau n'a pas de sauvegarde de Sillage" + (f" du {le}." if le else "."))
+        raise HTTPException(503, f"L'Anneau ne répond pas ({exc.__class__.__name__}) : réessaie plus tard.")
+    if not isinstance(r, dict):
+        raise HTTPException(503, "L'Anneau a répondu quelque chose d'illisible.")
+    return r
+
+
+@app.get("/api/restaurer")
+def restaurer_voir(le: str = ""):
+    """Sans « le » : les dates des sauvegardes gardées par l'Anneau. Avec : ce qui changerait (actuel → sauvegardé)."""
+    if not le:
+        dates = [d for d in (_chez_l_anneau().get("dates") or []) if isinstance(d, str)]
+        if not dates:
+            raise HTTPException(404, "L'Anneau n'a encore aucune sauvegarde de Sillage.")
+        return {"dates": dates}
+    if not JOUR.match(le):
+        raise HTTPException(400, "Date attendue sous la forme AAAA-MM-JJ.")
+    s = _chez_l_anneau(le)
+    return {"le": s.get("le", le), "version": s.get("version", ""),
+            "differences": maison.differences(_tous_reglages(), s.get("reglages") or {}, EXCLUS)}
+
+
+@app.post("/api/restaurer")
+def restaurer(corps: dict = Body(...)):
+    """Applique les réglages d'une sauvegarde qui diffèrent de l'actuel (réglages seulement : rien n'est écrit ailleurs)."""
+    le = str((corps or {}).get("le", "")).strip()
+    if not JOUR.match(le):
+        raise HTTPException(400, "Date attendue sous la forme AAAA-MM-JJ.")
+    s = _chez_l_anneau(le)
+    diffs = maison.differences(_tous_reglages(), s.get("reglages") or {}, EXCLUS)
+    changes = _changer({d["cle"]: d["sauve"] for d in diffs}) if diffs else []
+    log.warning("Réglages restaurés depuis la sauvegarde du %s : %s.", le, ", ".join(changes) or "rien à changer")
     return reglages()
 
 
@@ -705,9 +855,10 @@ def services():
         version, erreur, nombre = "", str(exc), 0
     return {"immich": {"repond": not erreur, "version": version, "erreur": erreur, "personnes": nombre,
                        "lecture_seule": True},
-            "carnet": ETAT.get("carnet", {"regle": bool(ETAT["cfg"].carnet_jeton), "erreur": "", "fiches": 0}),
-            "millesime": ETAT.get("reperes_etat", {"regle": bool(ETAT["cfg"].tag_estimee or ETAT["cfg"].tag_non_datee),
-                                                   "lu": False, "erreur": "", "estimees": 0, "non_datees": 0}),
+            "carnet": ETAT.get("carnet", {"regle": bool(ETAT["cfg"].jeton), "erreur": "", "fiches": 0}),
+            "millesime": ETAT.get("reperes_etat", {"regle": bool(_reglage("tag_estimee") or _reglage("tag_non_datee")),
+                                                   "lu": False, "erreur": "", "estimees": 0, "non_datees": 0,
+                                                   "tag_non_datee": _reglage("tag_non_datee"), "source": "", "chambre_noire": ""}),
             "cache": ETAT["cache"].place()}
 
 

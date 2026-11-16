@@ -50,7 +50,7 @@
   <p class="mt-1 text-sm" role="status">
     {#if !carnet}Lecture…{:else if !carnet.regle}Pas réglé : la liste d'ouverture est celle des personnes nommées d'Immich.{:else if carnet.erreur}{carnet.erreur} La liste d'ouverture est celle d'Immich en attendant.{:else}Répond. {carnet.fiches} fiche{carnet.fiches > 1 ? 's liées' : ' liée'} à une personne d'Immich.{/if}
   </p>
-  <p class="mt-2 text-sm text-muted-foreground">Sillage lit dans carnet la liste des fiches liées à Immich (nom, groupes). Il n'y écrit rien. Réglage : le même jeton dans SILLAGE_CARNET_JETON et dans CARNET_JETON_SILLAGE.</p>
+  <p class="mt-2 text-sm text-muted-foreground">Sillage lit dans carnet la liste des fiches liées à Immich (nom, groupes). Il n'y écrit rien. Réglage : le jeton commun de la maison (MAISON_JETON) dans la stack.</p>
 </section>
 
 <section class="mt-4 rounded-2xl border bg-card p-5" aria-label="Scans de Millésime">
@@ -61,5 +61,10 @@
   <p class="mt-1 text-sm" role="status">
     {#if !millesime}Lecture…{:else if !millesime.regle}Pas réglé : les scans sont pris avec la date qu'ils portent dans Immich.{:else if !millesime.lu}{millesime.erreur}{:else}{millesime.estimees} scan{millesime.estimees > 1 ? 's datés' : ' daté'} par estimation, dits « vers … » ; {millesime.non_datees} en attente de date, hors du chemin.{#if millesime.erreur} {millesime.erreur}{/if}{/if}
   </p>
-  <p class="mt-2 text-sm text-muted-foreground">Sillage lit dans Immich les tags que Millésime pose sur les scans : SILLAGE_TAG_ESTIMEE (« Date estimée » par défaut) et SILLAGE_TAG_NON_DATEE (le tag complet des scans non datés, vide : pas lu). La clé d'API doit pouvoir lire les tags. Rien n'est écrit.</p>
+  {#if millesime?.tag_non_datee}
+    <p class="mt-1 text-sm text-muted-foreground">Scans non datés : tag « {millesime.tag_non_datee} »{millesime.source === 'chambre-noire' ? ', donné par Chambre noire' : ', réglé dans Réglages'}.</p>
+  {:else if millesime?.chambre_noire}
+    <p class="mt-1 text-sm text-muted-foreground">{millesime.chambre_noire} Le tag des scans non datés n'est pas lu.</p>
+  {/if}
+  <p class="mt-2 text-sm text-muted-foreground">Sillage lit dans Immich les tags que Millésime pose sur les scans : le début des tags d'estimation et le tag complet des scans non datés, réglés dans Réglages (vide : celui de Chambre noire). La clé d'API doit pouvoir lire les tags. Rien n'est écrit.</p>
 </section>

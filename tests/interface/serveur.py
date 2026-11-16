@@ -61,15 +61,35 @@ def vie() -> FauxImmich:
     return faux
 
 
+def faux_anneau(adresse: str, jeton: str) -> dict:
+    """0.16 : un faux Anneau qui garde deux sauvegardes des réglages de Sillage (aucun réseau)."""
+    from urllib.parse import parse_qs, urlparse
+    le = parse_qs(urlparse(adresse).query).get("le", [""])[0]
+    if not le:
+        return {"dates": ["2026-11-15", "2026-11-14"]}
+    return {"le": le, "version": "0.16.0",
+            "reglages": {"cache_mo": 300, "dossiers_muets": ["Fourre-tout"], "tag_estimee": "Date estimée",
+                         "tag_non_datee": "Lots/Non datée", "hotes": []}}
+
+
 def main_() -> None:
     racine, port = Path(sys.argv[1]), int(sys.argv[2])
     (racine / "data").mkdir(parents=True, exist_ok=True)
     cfg = Config(password=MDP, immich_url="http://immich", immich_cle="cle", data=racine / "data",
-                 static=Path(__file__).resolve().parents[2] / "app" / "static", immich_adresse="http://photos.exemple",
-                 attente_connexion=False, jeton_ha="jeton-ha", tag_non_datee="Lots/Non datée")
-    main.ETAT.update(cfg=cfg, immich=Immich("http://immich", "cle", transport=vie().transport()))
-    # 0.5 : trois invitations de démonstration, notées dans invites.json pour les tests d'écran
+                 static=Path(__file__).resolve().parents[2] / "app" / "static",
+                 attente_connexion=False, jeton_ha="jeton-ha")
+    # 0.16 : le tag des non datées est un réglage de l'écran Réglages (fichier reglages.json du dossier de données)
     import json
+    reglages = racine / "data" / "reglages.json"
+    if not reglages.exists():
+        reglages.write_text(json.dumps({"tag_non_datee": "Lots/Non datée"}))
+    main.ETAT.update(cfg=cfg, immich=Immich("http://immich", "cle", transport=vie().transport()),
+                     lire_sauvegarde=faux_anneau)
+    # 0.15 : l'adresse d'Immich pour le navigateur vient de l'annuaire de l'Anneau (faux, sans réseau)
+    from app import maison
+    main.ANNUAIRE = maison.Annuaire(url="http://anneau", jeton="j",
+                                    lire=lambda: [{"nom": "Immich", "locale": "http://photos.exemple"}])
+    # 0.5 : trois invitations de démonstration, notées dans invites.json pour les tests d'écran
     import threading
     import time
     from datetime import date, timedelta

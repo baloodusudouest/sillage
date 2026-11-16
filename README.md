@@ -2,7 +2,7 @@
 
 Le chemin de vie d'une personne, lu dans Immich : ses photos rangées en étapes, les étapes en chapitres d'âge. Ancien nom : Frise.
 
-**État : 0.4.0. Sillage ne fait que lire Immich ; les corrections sont gardées chez lui.** Voir [`REPRISE.md`](REPRISE.md) et [`docs/dossier.md`](docs/dossier.md).
+**État : 0.16.0. Sillage ne fait que lire Immich ; les corrections et les réglages sont gardés chez lui.** Voir [`REPRISE.md`](REPRISE.md) et [`docs/dossier.md`](docs/dossier.md).
 
 ## Ce que fait Sillage
 
@@ -20,7 +20,17 @@ Sillage n'écrit rien dans Immich : un test le vérifie.
 
 Image : `ghcr.io/baloodusudouest/sillage:latest`, port 8093. Service et variables : [`docker-compose.yml`](docker-compose.yml) et [`.env.example`](.env.example).
 
-Clé d'API à créer dans Immich pour Sillage, avec ces seuls droits : `person.read`, `asset.read`, `asset.view`, `album.read`.
+Clé d'API à créer dans Immich pour Sillage, avec ces seuls droits : `person.read`, `asset.read`, `asset.view`, `album.read`, `tag.read`.
+
+Variables lues : `MAISON_PASSWORD`, `MAISON_JETON` (communes à la maison), `SILLAGE_IMMICH_URL`, `SILLAGE_IMMICH_CLE`, `SILLAGE_CARNET_URL`, `SILLAGE_JETON_HA` ; facultatives : `SILLAGE_HEURE_FRISES` (2 h), `MAISON_ANNEAU_URL` (`http://anneau:8094`).
+
+## Réglages et sauvegarde (0.16)
+
+- Les réglages d'usage se changent dans l'écran **Réglages**, sans redémarrer : mots des temps forts, dossiers muets, tag des dates estimées, tag des scans non datés (vide : celui que règle Chambre noire, lu par `GET /externe/noms` avec le jeton commun), place des vignettes, hôtes de la maison. Fichier `/data/reglages.json` (les hôtes restent dans `sillage.db`).
+- Au premier démarrage de la 0.16, chaque réglage absent du fichier est repris une fois de son ancienne variable (`SILLAGE_MOTS`, `SILLAGE_DOSSIERS_MUETS`, `SILLAGE_CACHE_MO`, `SILLAGE_TAG_ESTIMEE`, `SILLAGE_TAG_NON_DATEE`), puis ces variables ne sont plus lues.
+- `GET /externe/sauvegarde` (jeton commun `MAISON_JETON` ; vide : adresse fermée) rend les réglages à l'Anneau, qui les garde chaque nuit. Jamais de variable, de chemin ni de secret.
+- **Restaurer les réglages** (écran Réglages) : choisir une date gardée par l'Anneau, voir les différences, confirmer.
+- Lien « Ouvrir dans Immich » : l'adresse de la tuile « Immich » de l'Anneau ; sinon le même hôte que Sillage, port 2283.
 
 ## Tests
 
