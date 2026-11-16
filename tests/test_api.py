@@ -677,3 +677,75 @@ def test_le_recit_dit_vers_pour_un_scan_estime(monde, c):
     assert "Vers 1992, vers 5 ans : Kermesse de l'école." in texte
     assert "Naissance le 14 mars 1987. Décès le 1er janvier 2020." in texte
     assert "Le 1er juillet 1992, à 5 ans : Été à la mer." in texte              # la vraie photo du même jour garde sa date
+
+
+# ------------------------------------------------------------ 0.15 : variables communes de la maison
+
+def test_0_15_module_commun_maison(monkeypatch, tmp_path):
+    """Copie non retouchée du module du socle ; MAISON_PASSWORD puis SILLAGE_PASSWORD ; jeton envoyé à carnet :
+    l'ancien d'abord tant qu'il est posé, puis MAISON_JETON. Sillage n'a pas de lecture seule à régler."""
+    from app import config as config_mod
+    from app import maison
+    assert maison.empreinte_calculee() == maison.empreinte_ecrite()
+    for v in ("MAISON_PASSWORD", "MAISON_JETON", "MAISON_JETON_ANCIEN", "SILLAGE_CARNET_JETON", "SILLAGE_JETON_HA"):
+        monkeypatch.delenv(v, raising=False)
+    monkeypatch.setenv("SILLAGE_IMMICH_CLE", "cle")
+    monkeypatch.setenv("SILLAGE_DATA", str(tmp_path))
+    monkeypatch.setenv("SILLAGE_PASSWORD", "ancien-mot-de-passe")
+    cfg = config_mod.charger()
+    assert cfg.password == "ancien-mot-de-passe" and cfg.carnet_jeton == ""
+    monkeypatch.setenv("MAISON_PASSWORD", "court")                          # trop court : refusé, même commun
+    with pytest.raises(SystemExit, match="MAISON_PASSWORD"):
+        config_mod.charger()
+    monkeypatch.setenv("MAISON_PASSWORD", "mot-de-passe-commun")
+    monkeypatch.setenv("MAISON_JETON", "jeton-commun")
+    monkeypatch.setenv("SILLAGE_JETON_HA", "jeton-ha")
+    cfg = config_mod.charger()
+    assert cfg.password == "mot-de-passe-commun" and cfg.carnet_jeton == "jeton-commun"
+    assert cfg.jeton_ha == "jeton-ha"                                        # Home Assistant garde son jeton propre
+    monkeypatch.setenv("SILLAGE_CARNET_JETON", "jeton-de-sillage")           # transition : l'ancien jeton d'abord
+    assert config_mod.charger().carnet_jeton == "jeton-de-sillage"
+
+
+def test_0_15_jeton_commun_envoye_a_carnet(c):
+    """Le jeton que Sillage joint à sa demande à carnet est celui de la configuration (MAISON_JETON quand l'ancien est retiré)."""
+    import dataclasses
+    vues = avec_carnet((200, {"personnes": []}))
+    main.ETAT["cfg"] = dataclasses.replace(main.ETAT["cfg"], carnet_jeton="jeton-commun")
+    main.ETAT["personnes"] = None
+    c.get("/api/personnes")
+    assert vues == [("GET", "/sillage/personnes", "Bearer jeton-commun")]
+
+
+def test_0_15_la_porte_ha_refuse_le_jeton_commun(monde, monkeypatch):
+    """/ha/ garde le jeton de Home Assistant : MAISON_JETON ne l'ouvre pas."""
+    client, _ = monde
+    monkeypatch.setenv("MAISON_JETON", "jeton-commun-essai")
+    h = avec_jeton_ha()
+    corps = {"chambre": "ami", "noms": ["Camille ROUSSEL"], "jusqu_au": "2099-01-01"}
+    assert client.post("/ha/sejour", json=corps, headers={"Authorization": "Bearer jeton-commun-essai"}).status_code == 401
+    assert sejour(client, h, noms=["Camille ROUSSEL"])["trouves"] == ["Camille ROUSSEL"]    # le jeton de HA ouvre toujours
+
+
+def test_0_15_adresse_d_immich_par_l_annuaire(monde, c, monkeypatch):
+    """Lien « Ouvrir dans Immich » : l'annuaire de l'Anneau (tuile « Immich », privée par Tailscale), puis
+    SILLAGE_IMMICH_ADRESSE, puis le port (calculé par l'interface)."""
+    import dataclasses
+
+    from app import maison
+    services = [{"nom": "Immich", "locale": "http://nas.exemple:2283/", "privee": "https://nas.exemple.ts.net:2283"}]
+    monkeypatch.setattr(main, "ANNUAIRE", maison.Annuaire(url="http://anneau", jeton="j", lire=lambda: services))
+    r = c.get(f"/api/chemin/{CAMILLE}").json()
+    assert r["immich"] == "http://nas.exemple:2283"                                       # réseau local : l'adresse locale
+    r = c.get(f"/api/chemin/{CAMILLE}", headers={"host": "nas.exemple.ts.net:8093"}).json()
+    assert r["immich"] == "https://nas.exemple.ts.net:2283"                               # Tailscale : l'adresse privée
+    # L'Anneau ne connaît pas la tuile : SILLAGE_IMMICH_ADRESSE
+    monkeypatch.setattr(main, "ANNUAIRE", maison.Annuaire(url="http://anneau", jeton="j", lire=lambda: []))
+    assert c.get(f"/api/chemin/{CAMILLE}").json()["immich"] == "http://photos.exemple"
+    # L'Anneau injoignable et pas d'adresse réglée : vide, l'interface calcule avec le port
+    def injoignable():
+        raise OSError("refusé")
+    monkeypatch.setattr(main, "ANNUAIRE", maison.Annuaire(url="http://anneau", jeton="j", lire=injoignable))
+    main.ETAT["cfg"] = dataclasses.replace(main.ETAT["cfg"], immich_adresse="", immich_port=2283)
+    r = c.get(f"/api/chemin/{CAMILLE}").json()
+    assert (r["immich"], r["immich_port"]) == ("", 2283)

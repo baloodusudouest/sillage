@@ -1,5 +1,15 @@
 # Journal des versions
 
+## 0.15.0 — 16 novembre 2026
+- **Variables communes de la maison** (module `app/maison.py` du socle 0.5.0, copié tel quel) :
+  - mot de passe : `MAISON_PASSWORD`, repli sur `SILLAGE_PASSWORD` (toujours 12 caractères au moins) ;
+  - jeton envoyé à carnet (`/sillage/personnes`) : `SILLAGE_CARNET_JETON` tant qu'il est dans la stack, puis le jeton commun `MAISON_JETON` ;
+  - lien « Ouvrir dans Immich » : adresse lue dans l'Anneau (tuile « Immich », adresse privée quand Sillage est ouvert par Tailscale), puis `SILLAGE_IMMICH_ADRESSE`, puis le même hôte que Sillage avec `SILLAGE_IMMICH_PORT`, comme avant ;
+  - `/ha/` garde le jeton de Home Assistant (`SILLAGE_JETON_HA`) : le jeton commun ne l'ouvre pas.
+- Pas de lecture seule à régler : Sillage n'écrit chez aucun service.
+- Rien ne change tant que la stack n'a pas les nouvelles variables : chaque ancien nom reste lu.
+- Tests : 51 du serveur (copie du module non retouchée, mot de passe commun puis repli, jeton envoyé, porte de HA, adresse par l'annuaire puis replis), 26 d'écran.
+
 ## 0.14.1 — 15 novembre 2026
 - **Plus de saisie de date de décès dans Sillage.** La date se met dans carnet ou dans Treemich, nulle part ailleurs : Sillage la lit dans carnet (qui la reçoit de Treemich, d'iCloud ou de sa fiche). Bouton « Ajouter une date de décès » et adresse `PUT /api/personne/{id}/fin` retirés. Une personne décédée d'après carnet mais sans date porte la mention « la mettre dans carnet ou dans Treemich ». Une date saisie avec la 0.14.0 n'est plus lue.
 - Tests : 47 du serveur, 26 d'écran.

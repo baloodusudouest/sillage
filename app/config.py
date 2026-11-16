@@ -5,6 +5,8 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 
+from . import maison
+
 APPLI = "sillage"
 
 
@@ -15,11 +17,11 @@ class Config:
     immich_cle: str
     data: Path
     static: Path
-    immich_adresse: str = ""         # adresse d'Immich dans le navigateur (lien « Ouvrir dans Immich »)
+    immich_adresse: str = ""         # adresse d'Immich dans le navigateur (lien « Ouvrir dans Immich ») ; 0.15 : repli de l'annuaire
     mots: tuple[str, ...] = ()       # mots qui font d'une étape un temps fort ; vide : la liste par défaut
     immich_port: int = 0             # port d'Immich sur le NAS : sans adresse réglée, le lien vise le même hôte que Sillage
     carnet_url: str = ""             # adresse de carnet vue depuis la stack ; avec le jeton, la liste vient de carnet
-    carnet_jeton: str = ""           # le même jeton que CARNET_JETON_SILLAGE côté carnet ; vide : personnes d'Immich
+    carnet_jeton: str = ""           # jeton envoyé à carnet : SILLAGE_CARNET_JETON, puis MAISON_JETON (0.15) ; vide : personnes d'Immich
     jeton_ha: str = ""               # 0.5 : jeton de Home Assistant pour /ha/sejour ; vide : adresse fermée
     muets: tuple[str, ...] = ()      # noms de dossier qui ne disent rien, en plus de la liste par défaut
     cache_mo: int = 500              # 0.10 : place des vignettes gardées sur disque (Mo) ; 0 : pas de cache
@@ -30,9 +32,10 @@ class Config:
 
 
 def charger() -> Config:
-    mot_de_passe = os.environ.get("SILLAGE_PASSWORD", "")
+    mot_de_passe = maison.mot_de_passe("SILLAGE_PASSWORD")      # 0.15 : MAISON_PASSWORD, repli sur l'ancien nom
     if len(mot_de_passe) < 12:
-        raise SystemExit("SILLAGE_PASSWORD est absent ou trop court (12 caractères au moins) : Sillage ne démarre pas.")
+        raise SystemExit("MAISON_PASSWORD (ou SILLAGE_PASSWORD) est absent ou trop court (12 caractères au moins) : "
+                         "Sillage ne démarre pas.")
     cle = os.environ.get("SILLAGE_IMMICH_CLE", "").strip()
     if not cle:
         raise SystemExit("SILLAGE_IMMICH_CLE est absente : Sillage ne démarre pas (clé d'API Immich en lecture).")
@@ -45,8 +48,8 @@ def charger() -> Config:
         immich_adresse=os.environ.get("SILLAGE_IMMICH_ADRESSE", "").rstrip("/"),
         immich_port=int(os.environ.get("SILLAGE_IMMICH_PORT") or 0) if (os.environ.get("SILLAGE_IMMICH_PORT") or "0").strip().isdigit() else 0,
         carnet_url=os.environ.get("SILLAGE_CARNET_URL", "http://carnet:8096").rstrip("/"),
-        carnet_jeton=os.environ.get("SILLAGE_CARNET_JETON", "").strip(),
-        jeton_ha=os.environ.get("SILLAGE_JETON_HA", "").strip(),
+        carnet_jeton=maison.jeton_a_envoyer("SILLAGE_CARNET_JETON"),   # 0.15 : l'ancien jeton d'abord, puis MAISON_JETON
+        jeton_ha=os.environ.get("SILLAGE_JETON_HA", "").strip(),          # propre à Home Assistant : jamais le jeton commun
         muets=tuple(m.strip() for m in os.environ.get("SILLAGE_DOSSIERS_MUETS", "").split(",") if m.strip()),
         cache_mo=int(os.environ.get("SILLAGE_CACHE_MO") or 500) if (os.environ.get("SILLAGE_CACHE_MO") or "500").strip().isdigit() else 500,
         heure_frises=int(h) % 24 if (h := (os.environ.get("SILLAGE_HEURE_FRISES") or "2").strip()).isdigit() else 2,

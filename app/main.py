@@ -8,6 +8,9 @@ Routes : /health (publique), /api/session, /api/connexion, /api/deconnexion, /ap
 ceux qui attendent une date (SILLAGE_TAG_NON_DATEE) restent à part, comptés. La date de décès d'une personne
 vient de carnet seulement (qui la tient de Treemich, d'iCloud ou de sa fiche) : Sillage ne la saisit pas (0.14.1).
 
+0.15 : variables communes de la maison (app/maison.py, copie du socle) : MAISON_PASSWORD, jeton commun envoyé à carnet,
+adresse d'Immich pour le navigateur lue dans l'annuaire de l'Anneau (tuile « Immich »).
+
 0.13 : la frise d'une invitation est préparée dès que Home Assistant la pose, gardée dans la base, et refaite
 chaque nuit (SILLAGE_HEURE_FRISES, 2 h par défaut) avec les photos ajoutées : l'invité ne fait jamais attendre Immich.
 """
@@ -29,7 +32,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
-from . import __version__, chemin as calcul, recit as recits
+from . import __version__, chemin as calcul, maison, recit as recits
 from .base import SORTES, Base
 from .cache import Cache
 from .auth import COMMUN, DUREE, Sessions
@@ -43,6 +46,14 @@ MEMOIRE = 600            # secondes pendant lesquelles un chemin ou la liste des
 UUID = re.compile(r"^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
 VERROU = threading.Lock()
 log = logging.getLogger("sillage")
+ANNUAIRE = maison.Annuaire()      # 0.15 : adresses des services lues dans l'Anneau (jeton commun), gardées dix minutes
+
+
+def adresse_immich(hote: str = "") -> str:
+    """0.15 : adresse d'Immich pour le navigateur (lien « Ouvrir dans Immich »), dans cet ordre : l'annuaire de
+    l'Anneau (tuile « Immich », adresse privée si la page vient de Tailscale), puis SILLAGE_IMMICH_ADRESSE. Les deux
+    vides : l'interface calcule l'adresse sur le même hôte avec SILLAGE_IMMICH_PORT (`immich_port`)."""
+    return ANNUAIRE.adresse("Immich", prive=maison.est_prive(hote), repli=ETAT["cfg"].immich_adresse)
 
 
 def _fichier_generation(cfg: Config) -> Path:
@@ -250,7 +261,7 @@ def _noms_d_albums(photos: list[str]) -> dict[str, str]:
     return {p: connus[p] for p in photos if connus.get(p)}
 
 
-def _chemin(personne: str, frais: bool = False) -> dict:
+def _chemin(personne: str, frais: bool = False, hote: str = "") -> dict:
     """Le chemin d'une personne. Les photos lues dans Immich sont gardées dix minutes : une correction
     recalcule le chemin sans rien relire."""
     fiche = _personnes().get(personne)
@@ -268,18 +279,18 @@ def _chemin(personne: str, frais: bool = False) -> dict:
     estimees, non_datees = _reperes()
     resultat = calcul.calculer(fiche, garde_[1], _noms_d_albums, ETAT["cfg"].mots, ETAT["base"].marques(personne), ETAT["cfg"].muets,
                                estimees=estimees, non_datees=non_datees)
-    resultat["immich"] = ETAT["cfg"].immich_adresse
-    resultat["immich_port"] = ETAT["cfg"].immich_port
+    resultat["immich"] = adresse_immich(hote)                    # 0.15 : annuaire, puis SILLAGE_IMMICH_ADRESSE
+    resultat["immich_port"] = ETAT["cfg"].immich_port              # dernier repli, calculé par l'interface
     return resultat
 
 
 @app.get("/api/chemin/{personne}")
-def chemin(personne: str, frais: bool = False):
-    return _chemin(personne, frais)
+def chemin(personne: str, request: Request, frais: bool = False):
+    return _chemin(personne, frais, request.headers.get("host", ""))
 
 
 @app.post("/api/chemin/{personne}/marque")
-def marquer(personne: str, corps: dict = Body(...)):
+def marquer(personne: str, request: Request, corps: dict = Body(...)):
     """Une correction : « ce n'est pas elle », retirer une photo, choisir la photo phare, nommer ou masquer une étape.
     `effacer` : les photos dont on retire la marque ; `poser` : la photo qui la reçoit (aucune : on ne fait que retirer).
     Rien n'est écrit dans Immich."""
@@ -298,7 +309,7 @@ def marquer(personne: str, corps: dict = Body(...)):
                          connues[str(corps["poser"])] if corps.get("poser") else None, valeur)
     # 0.13 : les frises d'invités où paraît cette personne sont refaites avec la correction
     _oublier([i["jeton"] for i in ETAT["base"].invitations() if any(p["id"] == personne for p in i["personnes"])])
-    return _chemin(personne)
+    return _chemin(personne, hote=request.headers.get("host", ""))
 
 
 # ================================================================ raconter

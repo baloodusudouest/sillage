@@ -2,8 +2,9 @@
 
 Fichier à lire en premier dans une nouvelle session, et à mettre à jour à chaque fin de session, dans le même commit que le code.
 
-## État (15/11/2026)
+## État (16/11/2026)
 
+- **0.15.0** (16/11/2026) : variables communes (module `app/maison.py`, copie du socle 0.5.0 : ne pas le modifier ici, `python tools/diffuser_maison.py ../sillage` depuis le socle). `config.charger` lit `MAISON_PASSWORD` (repli `SILLAGE_PASSWORD`) et `carnet_jeton = maison.jeton_a_envoyer("SILLAGE_CARNET_JETON")` (puis `MAISON_JETON`) ; `main.ANNUAIRE` + `main.adresse_immich(hote)` pour le lien « Ouvrir dans Immich » (tuile « Immich » de l'Anneau, puis `SILLAGE_IMMICH_ADRESSE`, puis `immich_port` calculé par `Etape.svelte`) ; `/ha/` inchangé (`SILLAGE_JETON_HA`). Pas de lecture seule (Sillage n'écrit nulle part). Jamais essayé sur la vraie installation : les nouvelles variables ne sont pas encore dans la stack (tout passe par les anciens noms).
 - **0.14.1** : la date de décès vient de carnet seulement (choix de l'utilisateur : elle se met dans carnet ou Treemich). `main._fin(fiche)` lit `deces` ; plus d'adresse de saisie ni de réglage `fins` (resté éventuellement dans la base, plus lu).
 - **0.14.0** : scans de Millésime et date de décès. `chemin.estimation` lit « Date estimée/AAAA ±N » ; `calculer(..., estimees, non_datees)` : les estimés font une étape par année (`vers` = marge, `quand` = « vers AAAA », clé `vers-AAAA`, jamais réunie par `regrouper`), les non datés sont comptés (`ecartees.scans_non_dates`), ce qui est après `personne["fin"]` aussi (`apres_fin`). `main._reperes` lit les tags (`Immich.etiquettes`, `Immich.ids_du_tag`, une recherche `tagIds` par tag), gardé dix minutes, relu par « Relire » et par Connexion. `main._fin` : date de carnet (`deces`, carnet 2.24.1). **Jamais essayé contre le vrai Immich** : droit `tag.read` de la clé, nombre de tags d'estimation, temps de lecture.
 - Vérifications de la 0.13 et des versions d'avant faites par l'utilisateur le 15/11/2026 sur la vraie installation (vue des invités dans HA, carnet, vidéos, iframe, noms, photos phares, iPhone) : **tout fonctionne**.
