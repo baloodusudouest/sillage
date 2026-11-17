@@ -116,7 +116,7 @@ async def garde(request: Request, appel):
     if chemin.startswith("/ha/"):
         # 0.5 : Home Assistant prépare les invitations des chambres, avec son propre jeton
         jeton = ETAT["cfg"].jeton_ha
-        if not jeton or not hmac.compare_digest(request.headers.get("authorization", ""), f"Bearer {jeton}"):
+        if not jeton or not hmac.compare_digest(request.headers.get("authorization", "").encode(), f"Bearer {jeton}".encode()):
             return JSONResponse({"detail": "Jeton manquant ou invalide."}, status_code=401)
     elif chemin.startswith("/api/") and chemin not in PUBLIQUES and not chemin.startswith("/api/invite/") \
             and not ETAT["sessions"].connecte(request.cookies):
