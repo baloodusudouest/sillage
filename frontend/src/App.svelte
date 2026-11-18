@@ -10,7 +10,6 @@
   import Connexion from './pages/Connexion.svelte'
   import Sillages from './pages/Sillages.svelte'
   import Chemin from './pages/Chemin.svelte'
-  import Recit from './pages/Recit.svelte'
   import Invite from './pages/Invite.svelte'
   import Services from './pages/Services.svelte'
   import Chambres from './pages/Chambres.svelte'
@@ -31,7 +30,7 @@
 
   function lireRoute() {
     const [page, id] = location.hash.replace('#/', '').split('/')
-    if ((page === 'chemin' || page === 'recit') && id) return { page, id, onglet: 'sillages' }
+    if (page === 'chemin' && id) return { page, id, onglet: 'sillages' }
     const p = onglets.some((o) => o.page === page) ? page : 'sillages'
     return { page: p, onglet: p }
   }
@@ -94,8 +93,6 @@
         <div in:fly={{ y: 6, duration: 180 }}>
           {#if route.page === 'chemin'}
             <Chemin id={route.id} ondeconnecte={dehors} />
-          {:else if route.page === 'recit'}
-            <Recit id={route.id} ondeconnecte={dehors} />
           {:else if route.page === 'chambres'}
             <Chambres ondeconnecte={dehors} />
           {:else if route.page === 'connexion'}

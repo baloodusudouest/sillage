@@ -77,11 +77,6 @@ class Immich:
             page = int(suite) if suite else 0
         return ids
 
-    def personnes_de_photo(self, photo: str) -> list[str]:
-        """0.17 : les personnes reconnues sur une photo (lecture d'une photo) : pour marquer « à revoir » leurs récits."""
-        a = self._lire(f"/assets/{photo}", "la lecture d'une photo").json()
-        return [p["id"] for p in a.get("people") or [] if p.get("id")]
-
     def album_de(self, photo: str) -> str:
         """Le nom du premier album qui contient la photo ; vide si elle n'est dans aucun."""
         albums = self._lire("/albums", "la lecture des albums d'une photo", assetId=photo).json()

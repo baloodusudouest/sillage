@@ -4,7 +4,6 @@
   import { onMount } from 'svelte'
   import ArrowLeft from '@lucide/svelte/icons/arrow-left'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
-  import BookOpen from '@lucide/svelte/icons/book-open'
   import EyeOff from '@lucide/svelte/icons/eye-off'
   import { api } from '$lib/api.js'
   import { Button } from '$lib/components/ui/button/index.js'
@@ -118,7 +117,6 @@
           <button type="button" aria-pressed={tout} onclick={() => (tout = true)} class="h-8 rounded-full px-3 text-sm aria-pressed:bg-primary aria-pressed:text-primary-foreground">Tout</button>
         </div>
       {/if}
-      <Button variant="outline" href={'#/recit/' + id}><BookOpen class="size-4" aria-hidden="true" />Raconter</Button>
       <Button variant="outline" size="icon" aria-label="Relire dans Immich" disabled={lecture} onclick={() => lire(true)}>
         <RefreshCw class={'size-4 ' + (lecture ? 'animate-spin' : '')} aria-hidden="true" />
       </Button>

@@ -1,4 +1,4 @@
-"""La mémoire de Sillage : les corrections faites à la main et les récits relus. Un petit fichier SQLite.
+"""La mémoire de Sillage : les corrections faites à la main, les invitations et les avis des invités. Un petit fichier SQLite.
 
 Une correction est rattachée à l'empreinte du fichier, pas à l'identifiant de la photo dans Immich :
 l'identifiant change quand la photo est renvoyée (migration), l'empreinte non."""
@@ -35,7 +35,8 @@ class Base:
             CREATE TABLE IF NOT EXISTS marques (personne TEXT NOT NULL, empreinte TEXT NOT NULL, sorte TEXT NOT NULL,
                                                valeur TEXT NOT NULL DEFAULT '', le TEXT NOT NULL,
                                                PRIMARY KEY (personne, empreinte, sorte));
-            CREATE TABLE IF NOT EXISTS recits (personne TEXT PRIMARY KEY, texte TEXT NOT NULL, le TEXT NOT NULL);
+            -- 0.19 : « Raconter » retiré. La table « recits » des bases existantes reste en place (textes de l'utilisateur),
+            -- elle n'est plus ni lue ni écrite, ni créée dans une base neuve.
             CREATE TABLE IF NOT EXISTS reglages (cle TEXT PRIMARY KEY, valeur TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS invites (jeton TEXT PRIMARY KEY, chambre TEXT NOT NULL, personnes TEXT NOT NULL,
                                                 expire TEXT NOT NULL, cree_le TEXT NOT NULL);
@@ -53,10 +54,6 @@ class Base:
         # 0.6 : date d'arrivée, pour l'onglet « Chambres » (bases de la 0.5 : colonne ajoutée)
         if "du" not in [l["name"] for l in self._c.execute("PRAGMA table_info(invites)")]:
             self._c.execute("ALTER TABLE invites ADD COLUMN du TEXT NOT NULL DEFAULT ''")
-            self._c.commit()
-        # 0.17 : un récit gardé est marqué « à revoir » quand la date d'une photo de ses étapes change (avis d'invité accepté)
-        if "a_revoir" not in [l["name"] for l in self._c.execute("PRAGMA table_info(recits)")]:
-            self._c.execute("ALTER TABLE recits ADD COLUMN a_revoir TEXT NOT NULL DEFAULT ''")
             self._c.commit()
 
     def fermer(self) -> None:
@@ -78,27 +75,6 @@ class Base:
             if poser:
                 self._c.execute("INSERT OR REPLACE INTO marques VALUES (?, ?, ?, ?, ?)",
                                 (personne, poser, sorte, valeur, datetime.now().isoformat(timespec="seconds")))
-
-    def recit(self, personne: str) -> dict | None:
-        with self._verrou:
-            l = self._c.execute("SELECT texte, le, a_revoir FROM recits WHERE personne = ?", (personne,)).fetchone()
-        return dict(l) if l else None
-
-    def garder_recit(self, personne: str, texte: str | None) -> None:
-        with self._verrou, self._c:
-            if texte is None:
-                self._c.execute("DELETE FROM recits WHERE personne = ?", (personne,))
-            else:
-                # garder le texte relu efface la marque « à revoir »
-                self._c.execute("INSERT OR REPLACE INTO recits (personne, texte, le, a_revoir) VALUES (?, ?, ?, '')",
-                                (personne, texte, datetime.now().isoformat(timespec="seconds")))
-
-    def recits_a_revoir(self, personnes) -> int:
-        """0.17 : marque « à revoir » les récits gardés de ces personnes. Rend le nombre de récits marqués."""
-        personnes = list(dict.fromkeys(personnes))
-        with self._verrou, self._c:
-            return sum(self._c.execute("UPDATE recits SET a_revoir = ? WHERE personne = ?", (maintenant_tz(), p)).rowcount
-                       for p in personnes)
 
     # ------------------------------------------------------------ 0.5 : invités des chambres
     def invite(self, jeton: str) -> dict | None:

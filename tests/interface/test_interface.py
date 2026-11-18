@@ -206,25 +206,6 @@ def test_corriger_une_etape_et_une_photo(page):
     page.keyboard.press("Escape")
 
 
-def test_raconter(page):
-    page.goto(page.base + "/#/chemin/" + CAMILLE)
-    page.get_by_role("link", name="Raconter").click()
-    zone = page.get_by_label("Le récit")
-    zone.wait_for()
-    assert "Baptême de Camille." in zone.input_value() and zone.input_value().startswith("Camille ROUSSEL")
-    assert page.get_by_role("button", name="Garder ce texte").is_disabled()
-    zone.fill("Un texte relu et corrigé.")
-    page.get_by_role("button", name="Garder ce texte").click()
-    page.get_by_text("Récit gardé.").wait_for()
-    page.reload()
-    page.get_by_label("Le récit").wait_for()
-    assert page.get_by_label("Le récit").input_value() == "Un texte relu et corrigé."
-    page.get_by_role("button", name="Repartir du chemin").click()
-    page.get_by_text("Récit refait depuis le chemin.").wait_for()
-    assert page.get_by_label("Le récit").input_value().startswith("Camille ROUSSEL")
-    sans_debordement(page)
-
-
 def test_connexion_et_reglages(page):
     page.goto(page.base + "/#/connexion")
     page.get_by_text("Répond, version 3.4.1. 2 personnes nommées.").wait_for()

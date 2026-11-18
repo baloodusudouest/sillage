@@ -224,23 +224,18 @@ def test_le_nom_vient_de_l_album_le_plus_frequent_puis_du_dossier():
     assert calcul.nom_du_dossier({"originalPath": "/a/Mon dossier/x.jpg"}, muets=("mon dossier",)) == ""
 
 
-def test_raconter(c):
-    marque_ = lambda **k: marque(c, **k)
-    c.get(f"/api/chemin/{CAMILLE}")
-    r = c.get(f"/api/recit/{CAMILLE}").json()
-    assert r["garde_le"] is None and r["texte"] == r["propose"]
-    assert r["propose"] == (
-        "Camille ROUSSEL\n\nNaissance le 14 mars 1987.\n\n"
-        "0 à 9 ans\nDu 7 au 8 juin 1987, avant un an : Baptême de Camille.\nEt 1 autre moment en photos.\n\n"
-        "30 à 39 ans\nDu 15 au 16 juin 2019, à 32 ans : Mariage de Camille et Hugo.\n")
-    marque_(sorte="masquee", poser=ident("plage"))
-    assert "autre moment" not in c.get(f"/api/recit/{CAMILLE}").json()["propose"]      # une étape masquée ne se raconte pas
-    r = c.put(f"/api/recit/{CAMILLE}", json={"texte": "Mon texte relu."}).json()
-    assert r["texte"] == "Mon texte relu." and r["garde_le"] and r["propose"].startswith("Camille ROUSSEL")
-    assert c.get(f"/api/recit/{CAMILLE}").json()["texte"] == "Mon texte relu."
-    assert c.put(f"/api/recit/{CAMILLE}", json={"texte": None}).json()["garde_le"] is None   # repartir du chemin
-    assert c.put(f"/api/recit/{CAMILLE}", json={"texte": 12}).status_code == 422
-    assert c.put(f"/api/recit/{ident('personne')}", json={"texte": "x"}).status_code == 404
+def test_0_19_raconter_retire(monde, c):
+    """0.19 : « Raconter » retiré. Plus d'adresse du récit (lecture comme écriture), plus de récit dans la page de l'invité."""
+    client, _ = monde
+    assert c.get(f"/api/recit/{CAMILLE}").status_code == 404
+    assert c.get("/api/recit/x").status_code == 404
+    assert c.put("/api/recit/x", json={"texte": "Mon texte relu."}).status_code in (404, 405)
+    jeton = sejour(client, avec_jeton_ha(), noms=["Camille ROUSSEL"])["chemin"].split("/")[-1]
+    vue = client.get(f"/api/invite/{jeton}")
+    assert vue.status_code == 200
+    assert not any(m in vue.text.lower() for m in ("recit", "récit", "raconter"))
+    assert not (Path(main.__file__).parent / "recit.py").exists()
+    assert not (Path(__file__).parents[1] / "frontend/src/pages/Recit.svelte").exists()
 
 
 def avec_carnet(reponse):
@@ -676,18 +671,6 @@ def test_date_de_fin_venue_de_carnet(c):
     assert hugo["decede"] and hugo["fin"] is None                                   # décédé sans date : rien à saisir ici
     # 0.14.1 : Sillage ne saisit plus de date de décès (carnet ou Treemich seulement)
     assert c.put(f"/api/personne/{HUGO}/fin", json={"date": "2002-05-01"}).status_code in (404, 405)
-
-
-def test_le_recit_dit_vers_pour_un_scan_estime(monde, c):
-    _, faux = monde
-    avec_tags(faux, non_datee="Lots/Non datée")
-    faux.albums[ident("scan1")] = "Kermesse de l'école"
-    avec_carnet((200, {"personnes": [{"carnet_id": "f1", "nom": "Camille R.", "immich_id": CAMILLE, "groupes": [],
-                                      "proche": True, "decede": True, "deces": "2020-01-01"}]}))
-    texte = c.get(f"/api/recit/{CAMILLE}").json()["texte"]
-    assert "Vers 1992, vers 5 ans : Kermesse de l'école." in texte
-    assert "Naissance le 14 mars 1987. Décès le 1er janvier 2020." in texte
-    assert "Le 1er juillet 1992, à 5 ans : Été à la mer." in texte              # la vraie photo du même jour garde sa date
 
 
 # ------------------------------------------------------------ 0.15 et 0.16 : variables communes, anciens noms retirés

@@ -1,7 +1,7 @@
 """Sillage : le chemin de vie d'une personne, lu dans Immich. Lecture seule.
 
 Routes : /health (publique), /api/session, /api/connexion, /api/deconnexion, /api/personnes,
-/api/chemin/{personne} (et /marque), /api/recit/{personne}, /api/portrait/{personne},
+/api/chemin/{personne} (et /marque), /api/portrait/{personne},
 /api/vignette/{photo}, /api/services, /api/reglages, /api/restaurer, /externe/sauvegarde (jeton commun), puis l'interface.
 Invités : /api/invite/{jeton} (et /album/{photo}, /vignette/{photo}, /signalement/{photo}).
 Millésime : /externe/signalements et /externe/signalements/traite (jeton commun).
@@ -46,7 +46,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
-from . import __version__, chemin as calcul, maison, recit as recits
+from . import __version__, chemin as calcul, maison
 from .base import ISSUES, SORTES, Base, quand_tz
 from .cache import Cache
 from .auth import COMMUN, DUREE, Sessions, en_https
@@ -404,27 +404,6 @@ def marquer(personne: str, request: Request, corps: dict = Body(...)):
     # 0.13 : les frises d'invités où paraît cette personne sont refaites avec la correction
     _oublier([i["jeton"] for i in ETAT["base"].invitations() if any(p["id"] == personne for p in i["personnes"])])
     return _chemin(personne, hote=request.headers.get("host", ""))
-
-
-# ================================================================ raconter
-
-@app.get("/api/recit/{personne}")
-def recit(personne: str):
-    propose = recits.proposer(_chemin(personne))
-    garde_ = ETAT["base"].recit(personne)
-    return {"texte": garde_["texte"] if garde_ else propose, "propose": propose, "garde_le": garde_["le"] if garde_ else None,
-            "a_revoir": (garde_ or {}).get("a_revoir") or None}     # 0.17 : une date d'une photo de ses étapes a changé
-
-
-@app.put("/api/recit/{personne}")
-def garder_recit(personne: str, corps: dict = Body(...)):
-    if personne not in _personnes():
-        raise HTTPException(404, "Personne inconnue de Sillage.")
-    texte = corps.get("texte")
-    if texte is not None and (not isinstance(texte, str) or len(texte) > 100_000):
-        raise HTTPException(422, "Texte refusé.")
-    ETAT["base"].garder_recit(personne, texte)
-    return recit(personne)
 
 
 # ================================================================ invités des chambres (0.5)
@@ -991,7 +970,7 @@ def signalements(request: Request):
 @app.post("/externe/signalements/traite")
 def signalement_traite(request: Request, corps: dict = Body(...)):
     """Contrat 1 : Millésime a traité une photo. Ferme tous ses avis en attente (toutes invitations) ; rejouable
-    (la deuxième fois : 0 fermé). Accepté ou corrigé : les récits gardés des personnes de la photo passent « à revoir »."""
+    (la deuxième fois : 0 fermé). 0.19 : plus de récit à marquer « à revoir » (« Raconter » retiré)."""
     _porte_commune(request)
     asset = str((corps or {}).get("asset") or "") if isinstance(corps, dict) else ""
     issue = (corps or {}).get("issue") if isinstance(corps, dict) else None
@@ -999,20 +978,8 @@ def signalement_traite(request: Request, corps: dict = Body(...)):
         raise HTTPException(422, "« asset » : un identifiant de photo d'Immich est attendu.")
     if issue not in ISSUES:
         raise HTTPException(422, "« issue » : acceptee, corrigee ou ecartee.")
-    fermes, personnes = ETAT["base"].traiter(asset, issue)
-    if fermes and issue != "ecartee":
-        _en_fond(_recits_a_revoir, asset, personnes)
+    fermes, _personnes = ETAT["base"].traiter(asset, issue)
     return {"fermes": fermes}
-
-
-def _recits_a_revoir(asset: str, personnes: list[str]) -> None:
-    """Les récits gardés des personnes reconnues sur la photo (lues dans Immich), et des invités qui l'ont signalée."""
-    try:
-        sur_la_photo = ETAT["immich"].personnes_de_photo(asset)
-    except ErreurImmich as exc:
-        log.warning("Personnes de la photo illisibles : %s", exc)
-        sur_la_photo = []
-    ETAT["base"].recits_a_revoir([*sur_la_photo, *personnes])
 
 
 # ================================================================ images (derrière la session)

@@ -11,7 +11,6 @@ Le chemin de vie d'une personne, lu dans Immich : ses photos rangées en étapes
 - « Temps forts » (étapes dont le nom contient un mot de la liste) ou « Tout ».
 - Une étape ouverte : sa galerie, chaque photo en grand, un lien vers Immich.
 - Corrections à la main : nommer ou masquer une étape, choisir la photo phare, retirer une photo, « ce n'est pas cette personne ».
-- « Raconter » : le récit du chemin, proposé par gabarit, à relire et corriger.
 - Les images passent par Sillage, derrière le mot de passe. Ce qui est à la corbeille, archivé ou verrouillé dans Immich n'est pas montré.
 
 Sillage n'écrit rien dans Immich : un test le vérifie.
@@ -39,7 +38,7 @@ Variables lues : `MAISON_PASSWORD`, `MAISON_JETON` (communes à la maison), `SIL
 - Un avis en attente par invitation et par photo (renvoyer remplace) ; **100 avis en attente par invitation** au plus (au-delà : 429, « Julien a déjà beaucoup de photos à regarder : revenez un peu plus tard. »). Avis traités effacés 90 jours après leur traitement (au démarrage et chaque nuit). Les avis d'une invitation expirée restent jusqu'à leur traitement.
 - Côté invité, une photo est nommée par un **identifiant propre à Sillage** (24 caractères, HMAC de l'invitation et de la photo, clé tirée une fois et gardée dans `sillage.db`) : jamais l'identifiant Immich, ni dans les réponses ni dans les adresses (`/api/invite/<jeton>/vignette/<id>`, `/album/<id>`, `/signalement/<id>`).
 - Routes invité (sans mot de passe, le jeton de l'invitation ouvre) : `POST /api/invite/<jeton>/signalement/<id>` (`{"annee": 1987, "environ": true, "mot": "…"}`) et `DELETE` de la même adresse (changer d'avis). Réponse : `{"signalements": {<id>: {"etat": "signale" | "regardee", …}}, "photos_redatees": N}`.
-- Sillage n'écrit toujours rien dans Immich : **Millésime** lit les avis et, sur « Accepter » de Julien, écrit la date. Un récit gardé est marqué « à revoir » quand un avis d'une photo de la personne est accepté ou corrigé (bandeau dans « Raconter », effacé en gardant le texte).
+- Sillage n'écrit toujours rien dans Immich : **Millésime** lit les avis et, sur « Accepter » de Julien, écrit la date.
 
 ### Contrat 1 avec Millésime (jeton commun `MAISON_JETON` ; vide : adresse fermée, 404)
 

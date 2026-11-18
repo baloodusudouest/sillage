@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 0.19.0 — 18 novembre 2026 (Raconter retiré)
+- **« Raconter » retiré** (choix de Julien du 18/11/2026, après l'essai des IA du PC sur un chemin : aucun modèle ne tient « rien d'inventé », et le gabarit n'apporte pas assez). Plus de page Récit ni de bouton « Raconter » sur le chemin ; `GET` et `PUT /api/recit/{personne}` répondent 404 ; module `app/recit.py` supprimé (rien d'autre ne s'en servait).
+- **Plus de marque « à revoir »** : un avis d'invité accepté ou corrigé dans Millésime ferme l'avis, sans lire la photo dans Immich (`GET /assets/{id}` n'est plus demandé) ni toucher aux récits.
+- La page de l'invité n'a jamais montré de récit : rien à retirer de ce côté (un test le vérifie).
+- **Base** : la table `recits` des bases existantes reste en place (textes de Julien), elle n'est plus ni lue ni écrite ; une base neuve ne la crée plus. Aucune migration destructive.
+- Tests : 73 du serveur (3 nouveaux, 3 retirés) ; un test d'écran retiré (« Raconter »).
+
 ## 0.18.0 — 18 novembre 2026 (santé des tâches de fond)
 - **Tâches suivies dans `/health`** (champ `taches`, socle 0.9.1) : `frises-de-nuit` (régulière, 86 400 s : mise à jour de nuit des frises des invités, à `SILLAGE_HEURE_FRISES`), `preparation-frises` (à la demande : préparation d'une frise d'invitation, un tour par invitation), `copie-des-bases` (régulière, 86 400 s). Une boucle de nuit ratée passe « en retard » ; une frise ratée passe la préparation en « erreur ». Le comportement de l'appli ne change pas (les erreurs restent notées au journal comme avant).
 - **Copie de la base** chaque nuit à **01:30, heure de Paris** : `sillage.db` copiée de façon cohérente (API de sauvegarde de SQLite, vérifiée) vers `/data/copies/sillage-derniere.db`, écrasée chaque nuit (Hyper Backup tient l'historique) ; état dans `/health` (`copie_base`).

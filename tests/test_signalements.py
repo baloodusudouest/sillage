@@ -189,20 +189,32 @@ def test_ecarte_dit_la_date_reste_pendant_30_jours(monde, porte):
     assert client.get(f"/api/invite/{jeton}").json()["signalements"] == {}
 
 
-def test_un_recit_garde_passe_a_revoir(monde, c, porte):
-    client, _ = monde
-    assert c.put(f"/api/recit/{CAMILLE}", json={"texte": "Mon texte relu."}).json()["a_revoir"] is None
+def test_0_19_un_avis_accepte_ne_touche_plus_aux_recits(monde, porte):
+    """0.19 : « Raconter » retiré. Un avis accepté ferme l'avis sans lire la photo dans Immich ni écrire de récit."""
+    client, faux = monde
     jeton = inviter(client)
-    signaler(client, jeton, op(jeton, "plage"))
-    client.post("/externe/signalements/traite", headers=H, json={"asset": ident("plage"), "issue": "ecartee"})
-    _attendre_le_fond()
-    assert c.get(f"/api/recit/{CAMILLE}").json()["a_revoir"] is None                   # écarté : rien ne change
     signaler(client, jeton, op(jeton, "bapteme2"))
-    client.post("/externe/signalements/traite", headers=H, json={"asset": ident("bapteme2"), "issue": "corrigee"})
+    avant = len(faux.demandes)
+    r = client.post("/externe/signalements/traite", headers=H, json={"asset": ident("bapteme2"), "issue": "corrigee"})
+    assert r.json() == {"fermes": 1}
     _attendre_le_fond()
-    r = c.get(f"/api/recit/{CAMILLE}").json()
-    assert r["a_revoir"] and r["texte"] == "Mon texte relu."
-    assert c.put(f"/api/recit/{CAMILLE}", json={"texte": "Mon texte relu, revu."}).json()["a_revoir"] is None   # gardé : marque effacée
+    assert not any(ch.startswith("/assets/") and m == "GET" for m, ch in faux.demandes[avant:])
+    tables = {l[0] for l in main.ETAT["base"]._c.execute("SELECT name FROM sqlite_master WHERE type = 'table'")}
+    assert "recits" not in tables                                                     # base neuve : la table n'est plus créée
+
+
+def test_0_19_la_table_des_recits_d_une_ancienne_base_reste(tmp_path):
+    """0.19 : aucune migration destructive. Les récits gardés d'une base 0.17 restent dans le fichier."""
+    import sqlite3
+
+    from app.base import Base
+    f = tmp_path / "sillage.db"
+    with sqlite3.connect(f) as cx:
+        cx.execute("CREATE TABLE recits (personne TEXT PRIMARY KEY, texte TEXT NOT NULL, le TEXT NOT NULL, a_revoir TEXT NOT NULL DEFAULT '')")
+        cx.execute("INSERT INTO recits VALUES ('p1', 'Un texte inventé.', '2026-11-01T10:00:00', '')")
+    Base(f).fermer()
+    with sqlite3.connect(f) as cx:
+        assert cx.execute("SELECT texte FROM recits").fetchall() == [("Un texte inventé.",)]
 
 
 def test_aidez_moi_a_dater(monde, c, porte):

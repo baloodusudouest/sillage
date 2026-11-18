@@ -4,6 +4,7 @@ Fichier à lire en premier dans une nouvelle session, et à mettre à jour à ch
 
 ## État (18/11/2026)
 
+- **0.19.0** (18/11/2026) : « Raconter » retiré (choix de Julien : aucun modèle du PC ne tient « rien d'inventé », le gabarit n'apporte pas assez). Supprimés : `app/recit.py`, `frontend/src/pages/Recit.svelte`, route `recit` d'`App.svelte` (une ancienne adresse `#/recit/…` retombe sur Sillages), bouton « Raconter » de `Chemin.svelte`, routes `GET/PUT /api/recit/{personne}` (404), `Base.recit/garder_recit/recits_a_revoir`, `main._recits_a_revoir`, `Immich.personnes_de_photo` (ne servait qu'à la marque « à revoir »). `/externe/signalements/traite` ne fait plus que fermer les avis (`Base.traiter` rend toujours les personnes, plus utilisées). **Table `recits` laissée en place, plus utilisée** (ni lue, ni écrite ; plus créée dans une base neuve ; colonne `a_revoir` plus ajoutée). Tests : `test_0_19_*` (`tests/test_api.py`, `tests/test_signalements.py`).
 - **0.18.0** (18/11/2026) : santé des tâches de fond (socle 0.9.0). `main.cycle` déclare `TACHE_NUIT` (« frises-de-nuit », régulière 86 400 s, un tour = `_rafraichir_tout` dans `_chaque_nuit`) et `TACHE_PREPARATION` (« preparation-frises », à la demande, un tour par invitation dans `_preparer`), et lance `maison.planifier_copie("sillage", [sillage.db], /data/copies, 01:30 Paris)` (annulée à l'arrêt). `/health` fusionne `maison.sante(request, jeton_commun=maison.jetons(), session_ok=…)`. Tests : `tests/test_sante.py`. **Jamais essayé sur la vraie installation** (copie de nuit, restauration de la copie).
 - **0.17.0** (18/11/2026) : dates signalées par les invités (dossier `sillage-recit-signalements-dossier.md` du projet, § 5 ; le récit IA n'est PAS fait : V2).
   - Base : table `signalement` (id aléatoire, jeton, asset Immich, annee, environ, mot, date_affichee, invites (prénoms), personnes (ids), le, traite_le, issue) ; index unique partiel (jeton, asset) des avis en attente ; `Base.signaler/retirer_signalement/signalements_de/signalements_en_attente/traiter/effacer_traites` ; colonne `recits.a_revoir` (`recits_a_revoir`, effacée par `garder_recit`). Heures avec décalage (`base.maintenant_tz`).
@@ -51,15 +52,15 @@ Fichier à lire en premier dans une nouvelle session, et à mettre à jour à ch
 ## Pas encore fait
 
 1. La V1 est complète. Ensuite, dans l'ordre décidé : un mois d'usage (critère : montré au moins trois fois, le chemin de cinq personnes relu sans erreur de personne ni de date), puis page imprimable du journal de naissance et carte frise Lovelace, Treemich écrit en lot, vidéo famille et amis en local, fusion dans carnet si le mois s'est bien passé.
-2. Un récit plus vivant : refusé pour l'instant (gabarit choisi, rien d'inventé).
+2. Un récit : retiré en 0.19 (ni gabarit, ni IA du PC). Ne pas le refaire sans décision de Julien.
 
 ## Décisions à ne pas rouvrir sans raison
 
 - Étape = groupe de photos de la personne proches en dates ; l'album la nomme.
 - Lecture seule d'Immich ; réglages dans la base de Sillage, rattachés à l'empreinte des fichiers.
 - Personnes : carnet d'abord, Immich en secours.
-- « Raconter » dans la V1, sobre, avec relecture.
-- Vue des invités (0.5.0, 0.8.0) : jeton par séjour, rien que le chemin et les photos phares (ouvrables en grand) ; le propriétaire garde seul corrections, Raconter et Immich.
+- « Raconter » retiré en 0.19 (18/11/2026) : aucun modèle du PC ne tient « rien d'inventé », le gabarit n'apporte pas assez.
+- Vue des invités (0.5.0, 0.8.0) : jeton par séjour, rien que le chemin et les photos phares (ouvrables en grand) ; le propriétaire garde seul corrections et Immich.
 - Hors V1 : page imprimable, arbre généalogique, vidéo, sillages croisés, « ce jour-là ».
 - Technique : celle du dépôt socle.
 
