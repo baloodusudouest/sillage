@@ -929,3 +929,42 @@ def test_0_16_restaurer(monde, c):
     assert client.get("/api/restaurer").status_code == 401
     assert client.post("/api/restaurer", json={"le": "2026-11-15"}).status_code == 401
     assert client.get("/api/reglages").status_code == 401
+
+
+def test_m25_voir_l_album_de_l_invite_suit_le_filtre_du_chemin(monde):
+    """M25 (audit du 17/11/2026) : « Voir l'album » ne sert pas à l'invité une photo archivée, masquée ou verrouillée,
+    ni (à plusieurs invités) une photo où il y a quelqu'un d'autre que les invités et les hôtes."""
+    client, faux = monde
+    nom = "Mariage de Camille et Hugo"
+    faux.photos[CAMILLE] += [photo("masquee", "2019-06-15T18:00:00", visibility="hidden"),
+                             photo("foule", "2019-06-15T19:00:00", aussi=[ANONYME])]
+    faux.albums = {ident(n): nom for n in ("mariage1", "mariage2", "archive", "verrou", "masquee", "foule")}
+    h = avec_jeton_ha()
+    # Seul : le chemin prend toutes ses photos visibles (sans filtre des hôtes), jamais une archivée ou masquée
+    jeton = sejour(client, h, noms=["Camille ROUSSEL"])["chemin"].split("/")[-1]
+    r = client.get(f"/api/invite/{jeton}").json()
+    phare = next(e["phare"] for ch in r["chacun"][0]["chapitres"] for e in ch["etapes"] if e["phare"] in faux.albums)
+    ids = {p["id"] for p in client.get(f"/api/invite/{jeton}/album/{phare}").json()["photos"]}
+    assert ident("mariage1") in ids and ident("foule") in ids
+    assert not ids & {ident("archive"), ident("verrou"), ident("masquee")}
+    for cachee in ("archive", "verrou", "masquee"):
+        assert client.get(f"/api/invite/{jeton}/vignette/{ident(cachee)}").status_code == 404
+    # À deux : la photo avec quelqu'un d'autre n'est pas servie non plus
+    jeton = sejour(client, h, chambre="ado", noms=["Camille ROUSSEL", "Hugo MARCHAND"])["chemin"].split("/")[-1]
+    r = client.get(f"/api/invite/{jeton}").json()
+    phare = next(e["phare"] for ch in r["commun"]["chapitres"] for e in ch["etapes"] if e["phare"] in faux.albums)
+    ids = {p["id"] for p in client.get(f"/api/invite/{jeton}/album/{phare}").json()["photos"]}
+    assert ident("mariage1") in ids and ident("mariage2") in ids
+    assert not ids & {ident("archive"), ident("verrou"), ident("masquee"), ident("foule")}
+    assert client.get(f"/api/invite/{jeton}/vignette/{ident('foule')}").status_code == 404
+
+
+def test_m26_les_photos_gardees_en_memoire_sont_bornees(c, monkeypatch):
+    """M26 (audit du 17/11/2026) : la table des photos lues par personne ne grandit pas sans fin."""
+    monkeypatch.setattr(main, "LUES_MAX", 1)
+    c.get(f"/api/chemin/{CAMILLE}")
+    c.get(f"/api/chemin/{HUGO}")
+    assert list(main.ETAT["lues"]) == [HUGO]
+    c.get(f"/api/chemin/{CAMILLE}")
+    assert list(main.ETAT["lues"]) == [CAMILLE]
+    assert main.LUES_MAX == 1 and len(main.ETAT["lues"]) == 1

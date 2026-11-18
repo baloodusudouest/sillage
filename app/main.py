@@ -48,6 +48,7 @@ ETAT: dict = {}
 PUBLIQUES = ("/api/connexion", "/api/session")
 IMAGES = ("/api/portrait/", "/api/vignette/")
 MEMOIRE = 600            # secondes pendant lesquelles un chemin ou la liste des personnes est gardé
+LUES_MAX = 50            # M26 : personnes dont les photos restent en mémoire (les plus anciennes partent)
 UUID = re.compile(r"^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$")
 VERROU = threading.Lock()
 log = logging.getLogger("sillage")
@@ -328,7 +329,11 @@ def _chemin(personne: str, frais: bool = False, hote: str = "") -> dict:
             _reperes(frais=True)
         garde_ = (time.monotonic(), list(ETAT["immich"].photos_de(personne)))
         with VERROU:
-            ETAT["lues"][personne] = garde_
+            lues = ETAT["lues"]
+            lues.pop(personne, None)
+            lues[personne] = garde_                    # M26 : la dernière lue passe en fin de table
+            while len(lues) > LUES_MAX:
+                del lues[next(iter(lues))]             # la plus anciennement lue part
             ETAT["connues"].update({p["id"]: p.get("checksum") or "" for p in garde_[1] if calcul.visible(p)})
     estimees, non_datees = _reperes()
     resultat = calcul.calculer(fiche, garde_[1], _noms_d_albums, _mots(), ETAT["base"].marques(personne), _muets(),
@@ -520,8 +525,13 @@ def _calculer(inv: dict) -> dict:
     resultat = {"invites": [p["nom"] for p in inv["personnes"]], "commun": commun, "chacun": chacun,
                 "accueil": commun is None and not chacun}
     phares = sorted({e["phare"] for c in ([commun] if commun else []) + chacun for ch in c["chapitres"] for e in ch["etapes"]})
-    # Les photos où un invité est reconnu servent à « Voir l'album » (0.12.1) : lues ici, pas au clic de l'invité
-    photos_gens = sorted({p["id"] for g in gens for p in ETAT["immich"].photos_de(g["id"])})
+    # Les photos où un invité est reconnu servent à « Voir l'album » (0.12.1) : lues ici, pas au clic de l'invité.
+    # M25 (audit du 17/11/2026) : même filtre que le chemin (rien d'archivé, de masqué ni de verrouillé ; à plusieurs,
+    # photo de tous les invités ou d'un seul avec les hôtes, jamais avec quelqu'un d'autre).
+    hotes = {h["id"] for h in ETAT["base"].reglage("hotes", [])} if len(gens) > 1 else set()
+    tous = {g["id"] for g in gens}
+    photos_gens = sorted({p["id"] for g in gens for p in ETAT["immich"].photos_de(g["id"]) if calcul.visible(p)
+                          and (len(gens) == 1 or tous <= _personnes_sur(p) or _personnes_sur(p) <= {g["id"]} | hotes)})
     return {**resultat, "_phares": phares, "_gens": [g["id"] for g in gens], "_photos_etapes": photos_etapes,
             "_photos_gens": photos_gens}
 

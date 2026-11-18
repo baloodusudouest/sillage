@@ -1,5 +1,10 @@
 # Journal des versions
 
+## 0.16.4 — 18 novembre 2026 (constats moyens de l'audit)
+- **M25** : « Voir l'album » de l'invité suit le même filtre que son chemin : jamais une photo archivée, masquée ou verrouillée, et à plusieurs invités jamais une photo où il y a quelqu'un d'autre que les invités et les hôtes. **Jamais essayé contre le vrai Immich.**
+- **M26** : les photos lues pour chaque personne ouverte ne restent plus en mémoire pour toujours : 50 personnes au plus, la plus anciennement lue part.
+- `maison.py` du socle 0.8.2 (audit M3) : réglages secrets reconnus par mots, adresse avec identifiant écartée, champ `ecartes` dans la sauvegarde (noms seulement).
+
 ## 0.16.3 — 18 novembre 2026 (cookies Secure)
 - **Cookies `Secure` en https** (audit du 17/11/2026, même correctif dans toutes les applis maison) : ouverte en https (directement, derrière Tailscale Serve qui le dit par `X-Forwarded-Proto`, ou d'après l'origine de la page), l'appli pose ses cookies de session avec l'attribut `Secure` : ils ne partent jamais en clair. En http (adresse locale), rien ne change.
 - `entrypoint.sh` refuse de lancer l'appli en root quand `/data` appartient à root (dossier créé par Docker) et dit le remède ; dépannage seulement : `MAISON_ROOT_ACCEPTE=oui`.
