@@ -1,5 +1,13 @@
 # Journal des versions
 
+## 0.18.0 — 18 novembre 2026 (santé des tâches de fond)
+- **Tâches suivies dans `/health`** (champ `taches`, socle 0.9.1) : `frises-de-nuit` (régulière, 86 400 s : mise à jour de nuit des frises des invités, à `SILLAGE_HEURE_FRISES`), `preparation-frises` (à la demande : préparation d'une frise d'invitation, un tour par invitation), `copie-des-bases` (régulière, 86 400 s). Une boucle de nuit ratée passe « en retard » ; une frise ratée passe la préparation en « erreur ». Le comportement de l'appli ne change pas (les erreurs restent notées au journal comme avant).
+- **Copie de la base** chaque nuit à **01:30, heure de Paris** : `sillage.db` copiée de façon cohérente (API de sauvegarde de SQLite, vérifiée) vers `/data/copies/sillage-derniere.db`, écrasée chaque nuit (Hyper Backup tient l'historique) ; état dans `/health` (`copie_base`).
+- `/health` : champs ajoutés `version_socle`, `taches`, `copie_base` ; rien d'existant ne change. Les messages d'erreur des tâches n'y sont qu'avec le jeton commun (`Authorization: Bearer MAISON_JETON`) ou une session valide.
+- `maison.py` du socle 0.9.0. Un seul worker uvicorn (registre en mémoire).
+- Jamais essayé sur la vraie installation (ni la copie de nuit, ni sa remise en place).
+- Tests : 73 du serveur (3 nouveaux).
+
 ## 0.17.0 — 18 novembre 2026 (dates signalées par les invités)
 - **« Pas la bonne année ? »** sous chaque photo de la page de l'invité (chemin et « Voir l'album ») : « Vers quelle année ? », case « environ », souvenir facultatif (120 caractères, texte brut). Après l'envoi : « Merci, c'est transmis à Julien », marque « signalé » et « Changer d'avis » tant que ce n'est pas traité ; écarté : « Julien a regardé, la date reste » pendant 30 jours ; merci « Grâce à vous, N photos ont retrouvé leur année ».
 - **« Aidez-moi à dater »** en bas de la page de l'invité : jusqu'à 12 photos où un invité figure, hors du chemin faute de date (tag des scans non datés sans estimation), sauf celles que Julien a écartées.

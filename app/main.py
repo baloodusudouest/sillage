@@ -125,9 +125,16 @@ async def cycle(app: FastAPI):
                   if i["jeton"] not in ETAT["base"].preparees() or "_dates" not in (ETAT["base"].frise(i["jeton"]) or ({},))[0]]
     if manquantes:
         _en_fond(_preparer, manquantes)
+    # 0.18 : santé des tâches de fond (socle 0.9.0) — chaque boucle se déclare, chaque tour est suivi dans /health
+    maison.TACHES.declarer(TACHE_NUIT, periode_s=86400, type="reguliere")
+    maison.TACHES.declarer(TACHE_PREPARATION, type="demande")
     nuit = asyncio.create_task(_chaque_nuit())
+    # 0.18 : copie cohérente de la base chaque nuit (heure de Paris), dans <données>/copies
+    copie = asyncio.create_task(maison.planifier_copie(APPLI, [cfg.data / "sillage.db"], cfg.data / "copies",
+                                                       maison.HEURES_COPIE[APPLI]))
     yield
     nuit.cancel()
+    copie.cancel()
     for fil in ETAT["fond"]:
         fil.join(timeout=10)
     ETAT["base"].fermer()
@@ -159,8 +166,11 @@ async def _immich(_: Request, exc: ErreurImmich):
 
 
 @app.get("/health")
-def sante():
-    return {"ok": True, "version": __version__, "frises_pretes": len(ETAT["base"].preparees())}
+def sante(request: Request):
+    # 0.18 : + version_socle, taches, copie_base (socle 0.9.0) ; messages d'erreur seulement avec le jeton commun
+    # ou une session valide
+    return {"ok": True, "version": __version__, "frises_pretes": len(ETAT["base"].preparees()),
+            **maison.sante(request, jeton_commun=maison.jetons(), session_ok=ETAT["sessions"].connecte(request.cookies))}
 
 
 # ================================================================ connexion
@@ -636,9 +646,10 @@ def _chauffer(vue: dict) -> None:
 def _preparer(jetons: list[str]) -> None:
     for jeton in jetons:
         try:
-            vue = _preparer_un(jeton)
-            if vue:
-                _chauffer(vue)
+            with maison.TACHES.tour(TACHE_PREPARATION):      # 0.18 : une frise = un tour suivi dans /health
+                vue = _preparer_un(jeton)
+                if vue:
+                    _chauffer(vue)
         except Exception as exc:                     # Immich muet : la frise d'avant reste, la nuit suivante réessaie
             log.warning("Frise de l'invitation non préparée : %s", exc)
 
@@ -658,6 +669,10 @@ def _rafraichir_tout() -> None:
     ETAT["nuit"] = datetime.now().isoformat(timespec="seconds")
 
 
+TACHE_NUIT = "frises-de-nuit"              # 0.18 : nom de la boucle de nuit dans /health (taches)
+TACHE_PREPARATION = "preparation-frises"   # 0.18 : préparation d'une frise d'invitation (à la demande)
+
+
 def _prochaine(heure: int, maintenant: datetime) -> datetime:
     cible = maintenant.replace(hour=heure, minute=0, second=0, microsecond=0)
     return cible if cible > maintenant else cible + timedelta(days=1)
@@ -668,7 +683,8 @@ async def _chaque_nuit() -> None:
         maintenant = datetime.now()
         await asyncio.sleep((_prochaine(ETAT["cfg"].heure_frises, maintenant) - maintenant).total_seconds())
         try:
-            await asyncio.to_thread(_rafraichir_tout)
+            async with maison.TACHES.tour_async(TACHE_NUIT):   # 0.18 : un tour de la boucle de nuit
+                await asyncio.to_thread(_rafraichir_tout)
         except Exception as exc:
             log.warning("Mise à jour de nuit des frises : %s", exc)
 
