@@ -99,6 +99,12 @@ class FauxImmich:
                     if self.albums.get(x["id"]) == nom:
                         vues.setdefault(x["id"], self._avec_visages(x, qui))
             return httpx.Response(200, json={"id": ident(nom), "albumName": nom, "assets": list(vues.values())})
+        if chemin.startswith("/assets/") and chemin.count("/") == 2 and demande.method == "GET":   # 0.17 : une photo
+            for qui, liste in self.photos.items():
+                for x in liste:
+                    if x["id"] == chemin.split("/")[2]:
+                        return httpx.Response(200, json=self._avec_visages(x, qui))
+            return httpx.Response(404, json={"message": "photo inconnue"})
         if chemin.endswith("/video/playback"):           # 0.10 : une « vidéo » de 1 000 octets, lue par morceaux
             corps = bytes(range(250)) * 4
             plage = demande.headers.get("range", "")

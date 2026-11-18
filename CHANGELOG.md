@@ -1,5 +1,15 @@
 # Journal des versions
 
+## 0.17.0 — 18 novembre 2026 (dates signalées par les invités)
+- **« Pas la bonne année ? »** sous chaque photo de la page de l'invité (chemin et « Voir l'album ») : « Vers quelle année ? », case « environ », souvenir facultatif (120 caractères, texte brut). Après l'envoi : « Merci, c'est transmis à Julien », marque « signalé » et « Changer d'avis » tant que ce n'est pas traité ; écarté : « Julien a regardé, la date reste » pendant 30 jours ; merci « Grâce à vous, N photos ont retrouvé leur année ».
+- **« Aidez-moi à dater »** en bas de la page de l'invité : jusqu'à 12 photos où un invité figure, hors du chemin faute de date (tag des scans non datés sans estimation), sauf celles que Julien a écartées.
+- Base : table `signalement` (un avis en attente par invitation et par photo, renvoyer remplace) ; 100 avis en attente par invitation au plus (429) ; avis traités effacés après 90 jours (démarrage et nuit). Les prénoms de l'invitation sont gardés dans l'avis : une invitation expirée garde ses avis jusqu'à leur traitement.
+- **Contrat 1 avec Millésime** (jeton commun) : `GET /externe/signalements` (avis en attente, avec l'identifiant Immich et la date que l'invité voyait) et `POST /externe/signalements/traite` (ferme tous les avis de la photo, rejouable). Sillage n'écrit toujours rien dans Immich.
+- **Identifiants de photos propres à Sillage côté invité** (HMAC court par invitation et photo) : l'identifiant Immich ne sort plus vers l'invité, ni dans les réponses ni dans les adresses. Les adresses de vignettes des invités changent (`/api/invite/<jeton>/vignette/<id opaque>`) ; l'ancienne forme par identifiant Immich répond 404. Les frises préparées avant la 0.17 sont refaites au démarrage.
+- « Raconter » : un récit gardé est marqué « à revoir » quand un avis d'une photo de la personne est accepté ou corrigé dans Millésime ; garder le texte efface la marque.
+- Jamais essayé sur la vraie installation (ni la page de l'invité sur iPhone, ni la lecture par Millésime, ni la lecture des personnes d'une photo par `GET /assets/{id}` d'Immich).
+- Tests : 70 du serveur (10 nouveaux).
+
 ## 0.16.4 — 18 novembre 2026 (constats moyens de l'audit)
 - **M25** : « Voir l'album » de l'invité suit le même filtre que son chemin : jamais une photo archivée, masquée ou verrouillée, et à plusieurs invités jamais une photo où il y a quelqu'un d'autre que les invités et les hôtes. **Jamais essayé contre le vrai Immich.**
 - **M26** : les photos lues pour chaque personne ouverte ne restent plus en mémoire pour toujours : 50 personnes au plus, la plus anciennement lue part.

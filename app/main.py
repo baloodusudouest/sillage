@@ -3,6 +3,12 @@
 Routes : /health (publique), /api/session, /api/connexion, /api/deconnexion, /api/personnes,
 /api/chemin/{personne} (et /marque), /api/recit/{personne}, /api/portrait/{personne},
 /api/vignette/{photo}, /api/services, /api/reglages, /api/restaurer, /externe/sauvegarde (jeton commun), puis l'interface.
+Invités : /api/invite/{jeton} (et /album/{photo}, /vignette/{photo}, /signalement/{photo}).
+Millésime : /externe/signalements et /externe/signalements/traite (jeton commun).
+
+0.17 : les invités signalent une date fausse (« Pas la bonne année ? ») ou datent une photo de « Aidez-moi à dater ».
+Côté invité, une photo n'est jamais nommée par son identifiant Immich : identifiant opaque propre à Sillage
+(HMAC court par invitation et photo). Millésime lit les avis en attente et les ferme ; Sillage n'écrit rien dans Immich.
 
 0.16 : les réglages d'usage (mots des temps forts, dossiers muets, place des vignettes, tags de Millésime) se changent
 dans l'écran Réglages, sans redémarrer ; leur ancienne variable n'est lue qu'au premier démarrage. L'Anneau collecte
@@ -22,7 +28,10 @@ chaque nuit (SILLAGE_HEURE_FRISES, 2 h par défaut) avec les photos ajoutées : 
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import hmac
+import secrets
+import unicodedata
 import logging
 import re
 import threading
@@ -38,7 +47,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response, StreamingRes
 from starlette.background import BackgroundTask
 
 from . import __version__, chemin as calcul, maison, recit as recits
-from .base import SORTES, Base
+from .base import ISSUES, SORTES, Base, quand_tz
 from .cache import Cache
 from .auth import COMMUN, DUREE, Sessions, en_https
 from .config import APPLI, IMMICH_PORT, REGLAGES, VARIABLES, Config, charger
@@ -57,6 +66,15 @@ ANNUAIRE = maison.Annuaire()      # 0.15 : adresses des services lues dans l'Ann
 # maison.est_secret écarte de toute façon un nom qui ressemble à un secret)
 EXCLUS: tuple[str, ...] = ()
 JOUR = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+# 0.17 : dates signalées par les invités
+OPAQUE = re.compile(r"^[0-9a-f]{24}$")    # identifiant d'une photo côté invité (jamais l'identifiant Immich)
+LIMITE_AVIS = 100                         # avis en attente par invitation au-delà desquels Sillage refuse (429)
+AIDEZ_MAX = 12                            # photos de « Aidez-moi à dater »
+MOT_MAX = 120                             # longueur du mot libre d'un avis
+GARDE_TRAITES = 90                        # jours pendant lesquels un avis traité reste avant d'être effacé
+REGARDEE_JOURS = 30                       # jours pendant lesquels l'invité lit « Julien a regardé, la date reste »
+MERCI = "Merci, c'est transmis à Julien"
+TROP = "Julien a déjà beaucoup de photos à regarder : revenez un peu plus tard."
 
 
 def adresse_immich(hote: str = "") -> str:
@@ -96,8 +114,15 @@ async def cycle(app: FastAPI):
                 reglages=reglages_, base=Base(cfg.data / "sillage.db"),
                 cache=Cache(cfg.data / "vignettes", reglages_.get("cache_mo")),
                 fond=[], verrous={}, nuit=None)
-    # Les invitations posées sans frise (base d'avant la 0.13, arrêt pendant une préparation) sont préparées au démarrage
-    manquantes = [i["jeton"] for i in ETAT["base"].invitations() if i["jeton"] not in ETAT["base"].preparees()]
+    # 0.17 : clé des identifiants de photos montrés aux invités, tirée une fois et gardée dans la base
+    if not ETAT["base"].reglage("cle_photos"):
+        ETAT["base"].poser_reglage("cle_photos", secrets.token_hex(32))
+    ETAT["cle_photos"] = bytes.fromhex(ETAT["base"].reglage("cle_photos"))
+    _effacer_avis_traites()
+    # Les invitations posées sans frise (base d'avant la 0.13, arrêt pendant une préparation) sont préparées au démarrage ;
+    # 0.17 : celles d'avant la 0.17 aussi (sans dates des photos ni « Aidez-moi à dater »)
+    manquantes = [i["jeton"] for i in ETAT["base"].invitations()
+                  if i["jeton"] not in ETAT["base"].preparees() or "_dates" not in (ETAT["base"].frise(i["jeton"]) or ({},))[0]]
     if manquantes:
         _en_fond(_preparer, manquantes)
     nuit = asyncio.create_task(_chaque_nuit())
@@ -377,7 +402,8 @@ def marquer(personne: str, request: Request, corps: dict = Body(...)):
 def recit(personne: str):
     propose = recits.proposer(_chemin(personne))
     garde_ = ETAT["base"].recit(personne)
-    return {"texte": garde_["texte"] if garde_ else propose, "propose": propose, "garde_le": garde_["le"] if garde_ else None}
+    return {"texte": garde_["texte"] if garde_ else propose, "propose": propose, "garde_le": garde_["le"] if garde_ else None,
+            "a_revoir": (garde_ or {}).get("a_revoir") or None}     # 0.17 : une date d'une photo de ses étapes a changé
 
 
 @app.put("/api/recit/{personne}")
@@ -530,19 +556,52 @@ def _calculer(inv: dict) -> dict:
     # photo de tous les invités ou d'un seul avec les hôtes, jamais avec quelqu'un d'autre).
     hotes = {h["id"] for h in ETAT["base"].reglage("hotes", [])} if len(gens) > 1 else set()
     tous = {g["id"] for g in gens}
-    photos_gens = sorted({p["id"] for g in gens for p in ETAT["immich"].photos_de(g["id"]) if calcul.visible(p)
-                          and (len(gens) == 1 or tous <= _personnes_sur(p) or _personnes_sur(p) <= {g["id"]} | hotes)})
+    # 0.17 : la date que l'invité voit de chaque photo (None : pas encore datée) et « Aidez-moi à dater » : les photos
+    # d'un invité hors du chemin faute de date (tag des non datées, sans estimation), sauf celles que Julien a écartées.
+    estimees, non_datees = _reperes()
+    photos_gens: set[str] = set()
+    dates: dict[str, str | None] = {}
+    aidez: dict[str, str] = {}
+    for g in gens:
+        marques = lire_marques(g["id"])
+        for p in ETAT["immich"].photos_de(g["id"]):
+            if not calcul.visible(p) or not (len(gens) == 1 or tous <= _personnes_sur(p) or _personnes_sur(p) <= {g["id"]} | hotes):
+                continue
+            photos_gens.add(p["id"])
+            sans_date = p["id"] in non_datees and p["id"] not in estimees
+            quand = calcul.date_de(p)
+            dates[p["id"]] = None if sans_date or quand is None else quand.date().isoformat()
+            ecartee = {"pas_elle", "retiree"} & set(marques.get(p.get("checksum") or "", {}))
+            if sans_date and not ecartee:
+                aidez.setdefault(p["id"], p.get("localDateTime") or p.get("fileCreatedAt") or "")
     return {**resultat, "_phares": phares, "_gens": [g["id"] for g in gens], "_photos_etapes": photos_etapes,
-            "_photos_gens": photos_gens}
+            "_photos_gens": sorted(photos_gens), "_dates": dates,
+            "_aidez": [i for i, _ in sorted(aidez.items(), key=lambda x: (x[1], x[0]))][:AIDEZ_MAX]}
 
 
 def _en_memoire(jeton: str, contenu: dict) -> dict:
     """La frise gardée telle qu'elle sert : ensembles pour les contrôles ; les photos d'album déjà ouvertes restent permises."""
     avant = ETAT["invites"].get(jeton)
     vue = {**contenu, "_phares": set(contenu["_phares"]), "_photos_gens": set(contenu["_photos_gens"]),
-           "_album": avant["_album"] if avant else set()}
+           "_album": avant["_album"] if avant else set(), "_aidez_vus": set(contenu.get("_aidez", []))}
+    # 0.17 : identifiant opaque → identifiant Immich, pour toutes les photos que la vue de l'invitation peut montrer
+    # (phares, photos des étapes et de « Voir l'album », « Aidez-moi à dater »)
+    permises = vue["_phares"] | vue["_photos_gens"] | vue["_aidez_vus"] \
+        | {i for liste in contenu.get("_photos_etapes", {}).values() for i in liste}
+    vue["_ids"] = {_opaque(jeton, a): a for a in permises}
     ETAT["invites"][jeton] = vue
     return vue
+
+
+def _opaque(jeton: str, asset: str) -> str:
+    """0.17 : l'identifiant d'une photo pour une invitation : stable, propre à Sillage, sans rien de l'identifiant Immich
+    (HMAC de la clé gardée dans la base). Une autre invitation voit un autre identifiant pour la même photo."""
+    return hmac.new(ETAT["cle_photos"], f"{jeton}|{asset}".encode(), hashlib.sha256).hexdigest()[:24]
+
+
+def _asset(inv: dict, photo: str) -> str | None:
+    """L'identifiant Immich derrière un identifiant opaque de cette invitation ; None s'il n'est pas de sa vue."""
+    return inv["_ids"].get(photo) if OPAQUE.match(photo or "") else None
 
 
 def _verrou(jeton: str) -> threading.Lock:
@@ -594,6 +653,7 @@ def _rafraichir_tout() -> None:
     """La mise à jour de la nuit : les noms d'albums et les personnes sont relus, chaque frise refaite."""
     ETAT["albums"].clear()
     ETAT["toutes"] = None
+    _effacer_avis_traites()
     _preparer([i["jeton"] for i in ETAT["base"].invitations()])
     ETAT["nuit"] = datetime.now().isoformat(timespec="seconds")
 
@@ -705,12 +765,17 @@ def regler(corps: dict = Body(...)):
 def sauvegarde(request: Request):
     """0.16 : les réglages d'usage, collectés chaque nuit par l'Anneau. Jeton commun seulement ; aucun : porte fermée.
     Jamais de variable, de chemin ni de secret : rien que les réglages et la version."""
+    _porte_commune(request)
+    return maison.sauvegarde(APPLI, __version__, _tous_reglages(), exclus=EXCLUS)
+
+
+def _porte_commune(request: Request) -> None:
+    """Les adresses /externe/ : jeton commun seulement ; aucun jeton posé : porte fermée (404)."""
     acceptes = maison.jetons()
     if not acceptes:
         raise HTTPException(404, "Adresse fermée : MAISON_JETON n'est pas posé.")
     if not maison.jeton_valide(maison.jeton_propose(request.headers), acceptes):
         raise HTTPException(401, "Jeton refusé.")
-    return maison.sauvegarde(APPLI, __version__, _tous_reglages(), exclus=EXCLUS)
 
 
 def _chez_l_anneau(le: str = "") -> dict:
@@ -767,18 +832,104 @@ def chambres():
     return {"chambres": sortie, "heure_nuit": ETAT["cfg"].heure_frises}
 
 
+def _annee(inv: dict, asset: str) -> int | None:
+    """0.17 : l'année que l'invité voit pour cette photo ; None : pas encore datée."""
+    d = inv.get("_dates", {}).get(asset)
+    return int(d[:4]) if d else None
+
+
+def _vue_invite(jeton: str, inv: dict) -> dict:
+    """Ce qui part vers l'invité : la frise sans les clés « _ », chaque photo nommée par son identifiant opaque."""
+    def chemin_(c: dict) -> dict:
+        return {**c, "chapitres": [{**ch, "etapes": [{**e, "phare": _opaque(jeton, e["phare"]), "annee": _annee(inv, e["phare"])}
+                                                      for e in ch["etapes"]]} for ch in c["chapitres"]]}
+    vue = {k: v for k, v in inv.items() if not k.startswith("_")}
+    vue["commun"] = chemin_(vue["commun"]) if vue.get("commun") else vue.get("commun")
+    vue["chacun"] = [chemin_(c) for c in vue.get("chacun") or []]
+    vue["aidez"] = [{"id": _opaque(jeton, a)} for a in inv.get("_aidez", [])]
+    return vue
+
+
+def _etat_avis(jeton: str) -> dict:
+    """0.17 : ce que l'invité voit de ses avis : « signalé » (en attente), « regardée » (écarté par Julien depuis moins
+    de 30 jours : la date reste), rien sinon ; et le nombre de ses avis acceptés ou corrigés (le merci)."""
+    limite = datetime.now().astimezone() - timedelta(days=REGARDEE_JOURS)
+    etats: dict[str, dict] = {}
+    redatees = 0
+    for a in ETAT["base"].signalements_de(jeton):            # du plus ancien au plus récent : le dernier décide
+        cle = _opaque(jeton, a["asset"])
+        if a["traite_le"] is None:
+            etats[cle] = {"etat": "signale", "annee": a["annee"], "environ": a["environ"], "mot": a["mot"]}
+            continue
+        redatees += a["issue"] in ("acceptee", "corrigee")
+        if etats.get(cle, {}).get("etat") == "signale":
+            continue
+        if a["issue"] == "ecartee" and quand_tz(a["traite_le"]) > limite:
+            etats[cle] = {"etat": "regardee"}
+        else:
+            etats.pop(cle, None)
+    return {"signalements": etats, "photos_redatees": redatees}
+
+
 @app.get("/api/invite/{jeton}")
 def invitation(jeton: str):
-    return {k: v for k, v in _invitation(jeton).items() if not k.startswith("_")}
+    return {**_vue_invite(jeton, _invitation(jeton)), **_etat_avis(jeton)}
+
+
+def _mot(brut) -> str:
+    """Le mot libre d'un avis, en texte brut : une ligne, sans caractère de commande ; 120 caractères au plus."""
+    if brut is None:
+        return ""
+    if not isinstance(brut, str):
+        raise HTTPException(422, "Le souvenir doit être un texte.")
+    texte = "".join(" " if unicodedata.category(c) in ("Cc", "Zl", "Zp") else c for c in brut)
+    texte = " ".join(texte.split())
+    if len(texte) > MOT_MAX:
+        raise HTTPException(422, f"Le souvenir est trop long ({MOT_MAX} caractères au plus).")
+    return texte
+
+
+@app.post("/api/invite/{jeton}/signalement/{photo}")
+def signaler(jeton: str, photo: str, corps: dict = Body(...)):
+    """0.17 : l'invité propose une année pour une photo de sa vue (ou de « Aidez-moi à dater »). Renvoyer remplace son
+    avis ; 100 avis en attente par invitation au plus. Rien n'est écrit dans Immich : Millésime lit l'avis."""
+    inv = _invitation(jeton)                                  # expirée : 404
+    asset = _asset(inv, photo)
+    if not asset:
+        raise HTTPException(404, "Photo inconnue de cette invitation.")
+    annee = corps.get("annee") if isinstance(corps, dict) else None
+    if isinstance(annee, str) and annee.strip().isdigit():
+        annee = int(annee.strip())
+    if isinstance(annee, bool) or not isinstance(annee, int) or not 1900 <= annee <= date.today().year:
+        raise HTTPException(422, f"Une année entre 1900 et {date.today().year} est attendue.")
+    personnes = (ETAT["base"].invite(jeton) or {}).get("personnes", [])
+    ligne = ETAT["base"].signaler(jeton, asset, annee, bool(corps.get("environ")), _mot(corps.get("mot")),
+                                  inv.get("_dates", {}).get(asset), [p["nom"].split()[0] for p in personnes if p["nom"].split()],
+                                  [p["id"] for p in personnes if p.get("id")], LIMITE_AVIS)
+    if ligne is None:
+        raise HTTPException(429, TROP)
+    return {"message": MERCI, "photo": photo, **_etat_avis(jeton)}
+
+
+@app.delete("/api/invite/{jeton}/signalement/{photo}")
+def changer_d_avis(jeton: str, photo: str):
+    """0.17 : l'invité retire son avis tant qu'il n'est pas traité."""
+    inv = _invitation(jeton)
+    asset = _asset(inv, photo)
+    if not asset:
+        raise HTTPException(404, "Photo inconnue de cette invitation.")
+    return {"retires": ETAT["base"].retirer_signalement(jeton, asset), "photo": photo, **_etat_avis(jeton)}
 
 
 @app.get("/api/invite/{jeton}/album/{photo}")
 def album_invite(jeton: str, photo: str):
     """0.12 : l'album d'une photo phare, pour l'invité — seulement les photos de l'album où l'un des invités est
-    reconnu (l'album peut contenir d'autres gens, d'autres moments)."""
+    reconnu (l'album peut contenir d'autres gens, d'autres moments). 0.17 : photos nommées par leur identifiant opaque."""
     inv = _invitation(jeton)
-    if not UUID.match(photo) or photo not in inv["_phares"]:
+    asset = _asset(inv, photo)
+    if not asset or asset not in inv["_phares"]:
         raise HTTPException(404, "Photo inconnue de cette invitation.")
+    photo = asset
     # 0.12.1 : Immich ne dit pas qui est sur les photos d'un album : on croise avec les photos où un invité est reconnu.
     # Pas d'album, ou rien de commun : les photos de l'étape elle-même (celles que le compteur « 2 photos » annonce).
     a = ETAT["immich"].album_complet(photo)
@@ -786,16 +937,66 @@ def album_invite(jeton: str, photo: str):
     dans_album = [p["id"] for p in (a or {}).get("photos", []) if not p["video"] and p["id"] in inv["_photos_gens"]]
     ids = list(dict.fromkeys(dans_album + [i for i in etape if i not in dans_album])) if dans_album else etape
     inv["_album"].update(ids)
-    return {"nom": a["nom"] if a and dans_album else "", "photos": [{"id": i, "video": False} for i in ids], "total": len(ids)}
+    return {"nom": a["nom"] if a and dans_album else "", "total": len(ids),
+            "photos": [{"id": _opaque(jeton, i), "video": False, "annee": _annee(inv, i)} for i in ids]}
 
 
 @app.get("/api/invite/{jeton}/vignette/{photo}")
 def vignette_invite(jeton: str, photo: str, petite: bool = False):
-    """Seules les photos phares du chemin de l'invitation sont servies (0.12 : et celles de leurs albums déjà ouverts)."""
+    """Seules les photos phares du chemin de l'invitation sont servies (0.12 : et celles de leurs albums déjà ouverts ;
+    0.17 : et celles de « Aidez-moi à dater »). 0.17 : adresse par identifiant opaque, plus par identifiant Immich."""
     inv = _invitation(jeton)
-    if not UUID.match(photo) or (photo not in inv["_phares"] and photo not in inv["_album"]):
+    asset = _asset(inv, photo)
+    if not asset or (asset not in inv["_phares"] and asset not in inv["_album"] and asset not in inv["_aidez_vus"]):
         raise HTTPException(404, "Photo inconnue de cette invitation.")
-    return _vignette(photo, "thumbnail" if petite else "preview")
+    return _vignette(asset, "thumbnail" if petite else "preview")
+
+
+# ================================================================ avis des invités, pour Millésime (0.17)
+
+def _effacer_avis_traites() -> None:
+    """Les avis traités depuis plus de 90 jours sont effacés (au démarrage et chaque nuit)."""
+    n = ETAT["base"].effacer_traites(GARDE_TRAITES)
+    if n:
+        log.info("%s avis d'invités traités depuis plus de %s jours effacés.", n, GARDE_TRAITES)
+
+
+@app.get("/externe/signalements")
+def signalements(request: Request):
+    """Contrat 1 avec Millésime : les avis des invités pas encore traités, avec l'identifiant Immich de la photo
+    (il ne sort que par ici, derrière le jeton commun) et les prénoms de l'invitation."""
+    _porte_commune(request)
+    return {"contrat": 1, "signalements": [
+        {"id": a["id"], "asset": a["asset"], "annee": a["annee"], "environ": a["environ"], "mot": a["mot"],
+         "date_affichee": a["date_affichee"], "invites": a["invites"], "le": a["le"]}
+        for a in ETAT["base"].signalements_en_attente()]}
+
+
+@app.post("/externe/signalements/traite")
+def signalement_traite(request: Request, corps: dict = Body(...)):
+    """Contrat 1 : Millésime a traité une photo. Ferme tous ses avis en attente (toutes invitations) ; rejouable
+    (la deuxième fois : 0 fermé). Accepté ou corrigé : les récits gardés des personnes de la photo passent « à revoir »."""
+    _porte_commune(request)
+    asset = str((corps or {}).get("asset") or "") if isinstance(corps, dict) else ""
+    issue = (corps or {}).get("issue") if isinstance(corps, dict) else None
+    if not UUID.match(asset):
+        raise HTTPException(422, "« asset » : un identifiant de photo d'Immich est attendu.")
+    if issue not in ISSUES:
+        raise HTTPException(422, "« issue » : acceptee, corrigee ou ecartee.")
+    fermes, personnes = ETAT["base"].traiter(asset, issue)
+    if fermes and issue != "ecartee":
+        _en_fond(_recits_a_revoir, asset, personnes)
+    return {"fermes": fermes}
+
+
+def _recits_a_revoir(asset: str, personnes: list[str]) -> None:
+    """Les récits gardés des personnes reconnues sur la photo (lues dans Immich), et des invités qui l'ont signalée."""
+    try:
+        sur_la_photo = ETAT["immich"].personnes_de_photo(asset)
+    except ErreurImmich as exc:
+        log.warning("Personnes de la photo illisibles : %s", exc)
+        sur_la_photo = []
+    ETAT["base"].recits_a_revoir([*sur_la_photo, *personnes])
 
 
 # ================================================================ images (derrière la session)

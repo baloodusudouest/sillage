@@ -4,7 +4,9 @@
   // charger() → { nom, photos: [{ id, video }], total } ; image(id, grande) → adresse de la vignette.
   // video(id) → adresse de lecture (propriétaire seulement) ; sans elle, une vidéo s'affiche en image.
   // secours : le titre quand il n'y a pas d'album (l'invité voit alors les photos de l'étape)
-  let { charger, image, video = null, onferme, secours = '' } = $props()
+  // 0.17 (invité) : sous(p) : un bloc sous la photo ouverte en grand (« Pas la bonne année ? ») ;
+  // marque(id) : vrai si la photo porte un avis en attente (petite marque « signalé » dans la grille)
+  let { charger, image, video = null, onferme, secours = '', sous = null, marque = null } = $props()
   let album = $state(null)
   let erreur = $state('')
   let vue = $state(null)       // index de la photo ouverte en grand dans l'album
@@ -14,6 +16,8 @@
   })
   const aller = (pas) => (vue = (vue + pas + album.photos.length) % album.photos.length)
   function touche(ev) {
+    // 0.17 : en tapant une année, les flèches restent dans le champ
+    if (ev.key !== 'Escape' && ev.target?.closest?.('input, textarea, select')) return
     if (ev.key === 'Escape') { ev.stopPropagation(); vue !== null ? (vue = null) : onferme?.() }
     else if (vue !== null && ev.key === 'ArrowRight') aller(1)
     else if (vue !== null && ev.key === 'ArrowLeft') aller(-1)
@@ -38,6 +42,7 @@
       {#each album.photos as p, i (p.id)}
         <li><button type="button" onclick={() => (vue = i)} aria-label={'Photo ' + (i + 1) + (p.video ? ' (vidéo)' : '')}>
           <img src={image(p.id, false)} alt="" loading="lazy" />{#if p.video}<span class="lecture" aria-hidden="true">▶</span>{/if}
+          {#if marque?.(p.id)}<span class="signale">signalé</span>{/if}
         </button></li>
       {/each}
     </ul>
@@ -57,7 +62,11 @@
         <button type="button" class="rond avant" aria-label="Photo précédente" onclick={() => aller(-1)}>‹</button>
         <button type="button" class="rond apres" aria-label="Photo suivante" onclick={() => aller(1)}>›</button>
       {/if}
-      <p class="pied">{vue + 1} / {album.photos.length}</p>
+      {#if sous}
+        <div class="sous" ontouchstart={(e) => e.stopPropagation()} ontouchend={(e) => e.stopPropagation()}>
+          <p class="compteur">{vue + 1} / {album.photos.length}</p>{@render sous(p)}
+        </div>
+      {:else}<p class="pied">{vue + 1} / {album.photos.length}</p>{/if}
     </div>
   {/if}
 </div>
@@ -82,5 +91,12 @@
   .grand .avant, .grand .apres { position: absolute; top: 50%; transform: translateY(-50%); font-size: 1.8rem; }
   .grand .avant { left: max(0.5rem, env(safe-area-inset-left)); }
   .grand .apres { right: max(0.5rem, env(safe-area-inset-right)); }
+  .signale { position: absolute; left: 4px; bottom: 4px; padding: 0.05rem 0.4rem; border-radius: 999px; font-size: 0.68rem; font-weight: 600;
+    background: color-mix(in srgb, var(--app, #a98fd8) 85%, black); color: var(--app-contraste, #1b1230); }
+  /* 0.17 : sous la photo en grand, « Pas la bonne année ? » (l'invité) : une bande en bas, lisible sur iPhone */
+  .sous { position: absolute; left: 0; right: 0; bottom: 0; max-height: 70dvh; overflow-y: auto; color: #f2ece2;
+    padding: 0.5rem max(1rem, env(safe-area-inset-right)) calc(0.75rem + env(safe-area-inset-bottom)) max(1rem, env(safe-area-inset-left));
+    background: linear-gradient(transparent, rgb(0 0 0 / 0.85) 30%); }
+  .compteur { margin: 0 0 0.1rem; text-align: center; font-size: 0.85rem; opacity: 0.8; }
   .pied { position: absolute; bottom: calc(0.75rem + env(safe-area-inset-bottom)); left: 0; right: 0; text-align: center; color: #fff; opacity: 0.8; font-size: 0.85rem; margin: 0; }
 </style>

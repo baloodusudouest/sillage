@@ -2,8 +2,15 @@
 
 Fichier à lire en premier dans une nouvelle session, et à mettre à jour à chaque fin de session, dans le même commit que le code.
 
-## État (16/11/2026)
+## État (18/11/2026)
 
+- **0.17.0** (18/11/2026) : dates signalées par les invités (dossier `sillage-recit-signalements-dossier.md` du projet, § 5 ; le récit IA n'est PAS fait : V2).
+  - Base : table `signalement` (id aléatoire, jeton, asset Immich, annee, environ, mot, date_affichee, invites (prénoms), personnes (ids), le, traite_le, issue) ; index unique partiel (jeton, asset) des avis en attente ; `Base.signaler/retirer_signalement/signalements_de/signalements_en_attente/traiter/effacer_traites` ; colonne `recits.a_revoir` (`recits_a_revoir`, effacée par `garder_recit`). Heures avec décalage (`base.maintenant_tz`).
+  - Identifiants opaques côté invité : `main._opaque(jeton, asset)` (HMAC-SHA256 tronqué à 24 hex, clé `cle_photos` tirée une fois dans la table `reglages`, jamais dans les réglages exposés) ; `_en_memoire` construit `_ids` (opaque → asset) pour phares, photos des étapes, `_photos_gens` et `_aidez` ; `_asset(inv, id)`. Routes invité : vignette, album, `POST/DELETE /api/invite/{jeton}/signalement/{id}`. Les adresses de vignettes par identifiant Immich répondent désormais 404.
+  - `_calculer` garde `_dates` (asset → AAAA-MM-JJ, None si pas encore daté) et `_aidez` (12 au plus) ; une frise gardée sans `_dates` est refaite au démarrage. `_etat_avis(jeton)` : « signale », « regardee » (écarté < 30 j), `photos_redatees`.
+  - `/externe/signalements` et `/externe/signalements/traite` (contrat 1, README), même porte que `/externe/sauvegarde` (`_porte_commune`). Traité accepté/corrigé : en fond, `Immich.personnes_de_photo` (GET `/assets/{id}`) + personnes de l'invitation → récits « à revoir ».
+  - Interface : `lib/Signaler.svelte` (formulaire, marque, changer d'avis ; caché dans l'aperçu Chambres), `Album.svelte` (props `sous`, `marque`), `Invite.svelte` (« Aidez-moi à dater », merci), `Recit.svelte` (bandeau « À revoir »). Vu en capture à 390 px (chrome sans tête, serveur de démonstration) ; formulaire ouvert pas vu.
+  - **Jamais essayé sur la vraie installation** : page de l'invité sur iPhone, lecture par Millésime 2.13, droit de la clé pour `GET /assets/{id}` (sans lui, seuls les récits des invités qui ont signalé sont marqués).
 - **0.16.0** (16/11/2026) : réglages dans l'appli, sauvegarde et restauration ; anciens noms retirés.
   - Réglages d'usage : `config.REGLAGES` (clé → défaut) et `config.VARIABLES` (clé → ancienne variable, reprise au premier démarrage seulement) ; `maison.Reglages(/data/reglages.json, …)` créé dans `main.cycle` (`ETAT["reglages"]`, ligne au journal du conteneur par réglage repris). Clés : `mots` (liste, défaut `chemin.MOTS`), `dossiers_muets` (liste, vide), `cache_mo` (entier, 500, 0 = pas de cache), `tag_estimee` (texte, « Date estimée »), `tag_non_datee` (texte, vide). Les hôtes (0.7) restent dans la table `reglages` de `sillage.db`, exposés avec les autres (`main._tous_reglages`).
   - `main._changer` (écran et restauration) : types vérifiés (400, rien n'est changé), effets sans redémarrer : `Cache.regler` (vignettes élaguées), `ETAT["reperes"] = None` si un tag change, frises des chambres refaites (`_oublier`) sauf pour la seule place des vignettes.

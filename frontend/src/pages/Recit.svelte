@@ -43,6 +43,13 @@
 {#if recit === null && !erreur}
   <p class="text-sm text-muted-foreground" role="status">Lecture du chemin…</p>
 {:else if recit}
+  {#if recit.garde_le && recit.a_revoir}
+    <!-- 0.17 : un avis d'invité accepté ou corrigé a changé la date d'une photo de ses étapes depuis que ce texte est gardé -->
+    <p class="mb-3 max-w-[65ch] rounded-2xl border border-primary/50 p-3 text-sm" role="status">
+      <strong>À revoir</strong> : la date d'une photo du chemin a changé le {quand(recit.a_revoir)} (avis d'un invité accepté dans Millésime).
+      Relis le texte, puis garde-le pour effacer cette marque, ou repars du chemin.
+    </p>
+  {/if}
   <p class="mb-3 max-w-[65ch] text-sm text-muted-foreground">
     {recit.garde_le ? `Ton texte, gardé le ${quand(recit.garde_le)}.` : 'Proposé par Sillage à partir des étapes visibles du chemin : une phrase par étape nommée, rien d\'inventé.'}
     Corrige-le ici. Pour qu'une étape n'y soit pas, masque-la dans le chemin ; pour qu'elle ait sa phrase, donne-lui un nom.
@@ -51,7 +58,7 @@
   <textarea id="recit" bind:this={zone} bind:value={texte} rows="18" spellcheck="true"
             class="w-full max-w-[75ch] rounded-2xl border border-input bg-card p-4 text-base leading-relaxed outline-none focus:border-ring"></textarea>
   <div class="mt-3 flex flex-wrap items-center gap-2">
-    <Button onclick={garder} disabled={!change}>Garder ce texte</Button>
+    <Button onclick={garder} disabled={!change && !recit.a_revoir}>Garder ce texte</Button>
     <Button variant="outline" onclick={copier}>Copier</Button>
     {#if recit.garde_le || change}<Button variant="outline" onclick={repartir}>Repartir du chemin</Button>{/if}
     <span class="text-sm text-muted-foreground" role="status">{dit}</span>

@@ -2,10 +2,14 @@
   // 0.5 : le chemin montré à un invité des chambres, ouvert par l'adresse à jeton que Home Assistant a demandée.
   // Ni mot de passe, ni corrections, ni lien vers Immich : la photo phare de chaque étape, et rien d'autre.
   // Deux invités : leur chemin commun (par décennie) ; sans photo ensemble, le chemin de chacun.
+  // 0.17 : sous chaque photo, « Pas la bonne année ? » (avis transmis à Julien, jamais écrit dans Immich) ;
+  // en bas, « Aidez-moi à dater » : des photos des invités qui attendent leur année. Les photos sont nommées par
+  // un identifiant propre à Sillage, jamais par celui d'Immich.
   import { onMount } from 'svelte'
   import { ageDit, periode, quandDit, foisDit } from '$lib/dates.js'
   import Album from '$lib/Album.svelte'
   import Croix from '$lib/Croix.svelte'
+  import Signaler from '$lib/Signaler.svelte'
 
   // apercu (0.6) : la même page, montrée au propriétaire dans l'onglet « Chambres »
   let { jeton, apercu = false } = $props()
@@ -15,6 +19,11 @@
   let rang = $state(0)
   let grande = $state(null) // 0.8 : l'étape dont la photo phare est ouverte en grand
   let album = $state(null)  // 0.12 : la photo phare dont on regarde l'album
+  let avis = $state({})     // 0.17 : identifiant de photo → avis de l'invité ({ etat: 'signale' | 'regardee', … })
+  let redatees = $state(0)  // 0.17 : avis de cette invitation acceptés ou corrigés par Julien
+  let zoom = $state(null)   // 0.17 : la photo de « Aidez-moi à dater » ouverte en grand
+  const prendreAvis = (j) => { if (j) { avis = j.signalements || {}; redatees = j.photos_redatees || 0 } }
+  const merci = (n) => n === 1 ? 'Grâce à vous, 1 photo a retrouvé son année.' : `Grâce à vous, ${n} photos ont retrouvé leur année.`
   // 0.11 : plusieurs invités : un clic sur un prénom ou sur « Ensemble » ne garde que ces étapes (plusieurs à la fois) ; rien de choisi = tout
   let choisis = $state([])
   const basculer = (k) => (choisis = choisis.includes(k) ? choisis.filter((x) => x !== k) : [...choisis, k])
@@ -56,11 +65,35 @@
       const r = await fetch(`/api/invite/${encodeURIComponent(jeton)}`)
       if (!r.ok) throw new Error(r.status === 404 ? 'Cette page n\'est plus valable : le séjour est terminé, ou le lien a changé.' : 'Sillage ne répond pas pour l\'instant.')
       d = await r.json()
+      prendreAvis(d)
     } catch (e) { erreur = e.message }
   })
 </script>
 
-<svelte:window onscroll={mesurer} onresize={mesurer} onkeydown={(ev) => { if (ev.key === 'Escape' && !album) grande = null }} />
+<svelte:window onscroll={mesurer} onresize={mesurer} onkeydown={(ev) => { if (ev.key === 'Escape' && !album) { grande = null; zoom = null } }} />
+
+{#snippet aidezMoi()}
+  {#if d?.aidez?.length}
+    <section class="aidez" aria-labelledby="aidez-titre">
+      <h2 id="aidez-titre">Aidez-moi à dater</h2>
+      <p>Ces photos attendent encore leur année. Si un souvenir vous revient, dites-le à Julien.</p>
+      <ul>
+        {#each d.aidez as p (p.id)}
+          <li class:signalee={avis[p.id]?.etat === 'signale'}>
+            <button type="button" class="vignette" aria-label="Voir en grand" onclick={() => (zoom = p.id)}>
+              <img src={`/api/invite/${encodeURIComponent(jeton)}/vignette/${p.id}?petite=true`} alt="" loading="lazy" />
+            </button>
+            <Signaler {jeton} photo={p.id} annee={null} avis={avis[p.id]} onavis={prendreAvis} lecture={apercu} libelle="Je connais l'année" />
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
+{/snippet}
+
+{#snippet sousAlbum(p)}
+  <Signaler {jeton} photo={p.id} annee={p.annee} avis={avis[p.id]} onavis={prendreAvis} lecture={apercu} />
+{/snippet}
 
 <svelte:element this={apercu ? 'div' : 'main'} class={apercu ? '' : 'mx-auto max-w-5xl px-[max(1rem,env(safe-area-inset-left))] pt-[calc(1.25rem+env(safe-area-inset-top))] pb-[calc(2rem+env(safe-area-inset-bottom))]'}>
   {#if erreur}
@@ -72,6 +105,8 @@
       <h1 class="plume">Bienvenue{d.invites.length ? ' ' + prenoms(d.invites) : ''}</h1>
       <p>Pas encore de souvenirs ici : les photos du séjour viendront.</p>
     </div>
+    {#if redatees > 0}<p class="merci" role="status">{merci(redatees)}</p>{/if}
+    {@render aidezMoi()}
   {:else}
     <header class="entete">
       <h1>{d.commun ? 'Votre chemin ensemble' : chemins.length > 1 ? 'Vos chemins' : 'Votre chemin'}</h1>
@@ -84,6 +119,7 @@
           {#if choisis.length}<li class="tous"><button type="button" onclick={() => (choisis = [])}>Tout montrer</button></li>{/if}
         </ul>
       {/if}
+      {#if redatees > 0}<p class="merci" role="status">{merci(redatees)}</p>{/if}
     </header>
 
     {#if chemins.length > 1}
@@ -120,6 +156,7 @@
                       <strong class:plume={!!e.nom}>{e.nom || quandDit(e)}</strong>
                       <small>{e.nom ? quandDit(e) + foisDit(e) : ''}{e.nom && e.age != null ? ' · ' : ''}{ageDit(e.age, e.vers)}{e.nombre > 1 ? (e.nom || e.age != null ? ' · ' : '') + e.nombre + ' photos' : ''}</small>
                     </span>
+                    <div class="sig"><Signaler {jeton} photo={e.phare} annee={e.annee} avis={avis[e.phare]} onavis={prendreAvis} lecture={apercu} /></div>
                   </div>
                 </li>
               {/each}
@@ -128,8 +165,17 @@
         {/each}
       </div>
     {/key}
+    {@render aidezMoi()}
   {/if}
 </svelte:element>
+
+{#if zoom}
+  <div class="grand" role="dialog" aria-modal="true" aria-label="Photo à dater">
+    <button type="button" class="fond" aria-label="Fermer" onclick={() => (zoom = null)}></button>
+    <figure><img src={`/api/invite/${encodeURIComponent(jeton)}/vignette/${zoom}`} alt="" /></figure>
+    <Croix label="Fermer" onclick={() => (zoom = null)} />
+  </div>
+{/if}
 
 {#if grande}
   <div class="grand" role="dialog" aria-modal="true" aria-label={grande.nom || quandDit(grande)}>
@@ -145,7 +191,8 @@
 {#if album}
   <Album charger={() => fetch(`/api/invite/${encodeURIComponent(jeton)}/album/${album}`).then((r) => { if (!r.ok) throw new Error('Album indisponible.'); return r.json() })}
          image={(id, g) => `/api/invite/${encodeURIComponent(jeton)}/vignette/${id}${g ? '' : '?petite=true'}`}
-         secours={grande ? grande.nom || quandDit(grande) : ''} onferme={() => (album = null)} />
+         secours={grande ? grande.nom || quandDit(grande) : ''} onferme={() => (album = null)}
+         sous={sousAlbum} marque={(id) => avis[id]?.etat === 'signale'} />
 {/if}
 
 <style>
@@ -225,6 +272,20 @@
   .grand figcaption { display: grid; justify-items: center; color: var(--foreground); text-align: center; }
   .grand figcaption .plume { font-size: 2rem; color: var(--app); }
   .grand small { color: var(--muted-foreground); }
+  /* 0.17 : « Pas la bonne année ? » sous la photo ; une photo isolée garde sa ligne, le bouton passe dessous */
+  .sig { padding: 0 0.9rem 0.35rem; }
+  .petite .carte { flex-wrap: wrap; }
+  .petite .sig { flex-basis: 100%; padding-top: 0; }
+  .merci { margin: 0.25rem 0 0; font-size: 0.92rem; color: var(--valide, var(--app)); }
+  .aidez { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); }
+  .aidez h2 { margin: 0 0 0.35rem; font-size: 1.35rem; font-weight: 400; letter-spacing: -0.01em; color: var(--app); }
+  .aidez > p { margin: 0 0 1rem; max-width: 46ch; color: var(--muted-foreground); font-size: 0.92rem; }
+  .aidez ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem 0.75rem; grid-template-columns: repeat(auto-fill, minmax(min(44vw, 11rem), 1fr)); }
+  .aidez li { min-width: 0; }
+  .aidez li:has(form) { grid-column: 1 / -1; }   /* le formulaire ouvert prend toute la ligne (iPhone : deux colonnes) */
+  .aidez .vignette { display: block; width: 100%; padding: 0; border: 0; background: var(--secondary); border-radius: 0.6rem; overflow: hidden; cursor: zoom-in; }
+  .aidez .vignette img { display: block; width: 100%; aspect-ratio: 1; object-fit: cover; }
+  .aidez li.signalee .vignette { outline: 2px solid color-mix(in srgb, var(--app) 70%, transparent); outline-offset: 2px; }
   .accueil { min-height: 40dvh; display: grid; place-content: center; gap: 0.75rem; text-align: center; padding: 2rem 1rem; }
   .accueil h1 { font-size: 3.4rem; margin: 0; }
   .accueil p { margin: 0; max-width: 34ch; color: var(--muted-foreground); }

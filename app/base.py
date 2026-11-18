@@ -8,10 +8,22 @@ import json
 import secrets
 import sqlite3
 import threading
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 SORTES = ("pas_elle", "retiree", "phare", "titre", "masquee")
+ISSUES = ("acceptee", "corrigee", "ecartee")     # 0.17 : ce que Millésime a fait d'un avis d'invité
+
+
+def maintenant_tz() -> str:
+    """0.17 : l'heure du conteneur avec son décalage (« 2026-11-18T10:00:00+01:00 »), comme le contrat avec Millésime."""
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def quand_tz(texte: str) -> datetime:
+    """Relit une heure gardée ; sans décalage, c'est l'heure du conteneur."""
+    d = datetime.fromisoformat(texte)
+    return d if d.tzinfo else d.astimezone()
 
 
 class Base:
@@ -28,10 +40,23 @@ class Base:
             CREATE TABLE IF NOT EXISTS invites (jeton TEXT PRIMARY KEY, chambre TEXT NOT NULL, personnes TEXT NOT NULL,
                                                 expire TEXT NOT NULL, cree_le TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS frises (jeton TEXT PRIMARY KEY, contenu TEXT NOT NULL, le TEXT NOT NULL);
+            -- 0.17 : dates signalées par les invités. Les prénoms et les personnes de l'invitation sont recopiés dans l'avis :
+            -- une invitation expirée ou retirée disparaît de « invites », ses avis restent jusqu'à leur traitement.
+            CREATE TABLE IF NOT EXISTS signalement (id TEXT PRIMARY KEY, jeton TEXT NOT NULL, asset TEXT NOT NULL,
+                                                    annee INTEGER NOT NULL, environ INTEGER NOT NULL DEFAULT 0,
+                                                    mot TEXT NOT NULL DEFAULT '', date_affichee TEXT, invites TEXT NOT NULL,
+                                                    personnes TEXT NOT NULL DEFAULT '[]', le TEXT NOT NULL,
+                                                    traite_le TEXT, issue TEXT);
+            CREATE UNIQUE INDEX IF NOT EXISTS signalement_actif ON signalement (jeton, asset) WHERE traite_le IS NULL;
+            CREATE INDEX IF NOT EXISTS signalement_asset ON signalement (asset);
         """)
         # 0.6 : date d'arrivée, pour l'onglet « Chambres » (bases de la 0.5 : colonne ajoutée)
         if "du" not in [l["name"] for l in self._c.execute("PRAGMA table_info(invites)")]:
             self._c.execute("ALTER TABLE invites ADD COLUMN du TEXT NOT NULL DEFAULT ''")
+            self._c.commit()
+        # 0.17 : un récit gardé est marqué « à revoir » quand la date d'une photo de ses étapes change (avis d'invité accepté)
+        if "a_revoir" not in [l["name"] for l in self._c.execute("PRAGMA table_info(recits)")]:
+            self._c.execute("ALTER TABLE recits ADD COLUMN a_revoir TEXT NOT NULL DEFAULT ''")
             self._c.commit()
 
     def fermer(self) -> None:
@@ -56,7 +81,7 @@ class Base:
 
     def recit(self, personne: str) -> dict | None:
         with self._verrou:
-            l = self._c.execute("SELECT texte, le FROM recits WHERE personne = ?", (personne,)).fetchone()
+            l = self._c.execute("SELECT texte, le, a_revoir FROM recits WHERE personne = ?", (personne,)).fetchone()
         return dict(l) if l else None
 
     def garder_recit(self, personne: str, texte: str | None) -> None:
@@ -64,8 +89,16 @@ class Base:
             if texte is None:
                 self._c.execute("DELETE FROM recits WHERE personne = ?", (personne,))
             else:
-                self._c.execute("INSERT OR REPLACE INTO recits VALUES (?, ?, ?)",
+                # garder le texte relu efface la marque « à revoir »
+                self._c.execute("INSERT OR REPLACE INTO recits (personne, texte, le, a_revoir) VALUES (?, ?, ?, '')",
                                 (personne, texte, datetime.now().isoformat(timespec="seconds")))
+
+    def recits_a_revoir(self, personnes) -> int:
+        """0.17 : marque « à revoir » les récits gardés de ces personnes. Rend le nombre de récits marqués."""
+        personnes = list(dict.fromkeys(personnes))
+        with self._verrou, self._c:
+            return sum(self._c.execute("UPDATE recits SET a_revoir = ? WHERE personne = ?", (maintenant_tz(), p)).rowcount
+                       for p in personnes)
 
     # ------------------------------------------------------------ 0.5 : invités des chambres
     def invite(self, jeton: str) -> dict | None:
@@ -144,3 +177,67 @@ class Base:
             return {l["jeton"]: l["le"] for l in self._c.execute(
                 "SELECT f.jeton, f.le FROM frises f JOIN invites i ON i.jeton = f.jeton WHERE i.expire > ?",
                 (datetime.now().isoformat(timespec="seconds"),))}
+
+    # ------------------------------------------------------------ 0.17 : dates signalées par les invités
+    def signaler(self, jeton: str, asset: str, annee: int, environ: bool, mot: str, date_affichee: str | None,
+                 invites: list[str], personnes: list[str], limite: int) -> dict | None:
+        """Pose l'avis de cette invitation sur cette photo. Un seul avis en attente par (invitation, photo) : renvoyer
+        remplace (nouvel identifiant). Rend None si l'invitation a déjà `limite` avis en attente (sans compter celui
+        qu'on remplace)."""
+        with self._verrou, self._c:
+            actif = self._c.execute("SELECT id FROM signalement WHERE jeton = ? AND asset = ? AND traite_le IS NULL",
+                                    (jeton, asset)).fetchone()
+            if not actif and self._c.execute("SELECT COUNT(*) FROM signalement WHERE jeton = ? AND traite_le IS NULL",
+                                             (jeton,)).fetchone()[0] >= limite:
+                return None
+            if actif:
+                self._c.execute("DELETE FROM signalement WHERE id = ?", (actif["id"],))
+            ligne = {"id": secrets.token_urlsafe(12), "jeton": jeton, "asset": asset, "annee": int(annee),
+                     "environ": 1 if environ else 0, "mot": mot, "date_affichee": date_affichee,
+                     "invites": json.dumps(invites, ensure_ascii=False), "personnes": json.dumps(personnes),
+                     "le": maintenant_tz()}
+            self._c.execute("INSERT INTO signalement (id, jeton, asset, annee, environ, mot, date_affichee, invites, personnes, le) "
+                            "VALUES (:id, :jeton, :asset, :annee, :environ, :mot, :date_affichee, :invites, :personnes, :le)", ligne)
+        return ligne
+
+    def retirer_signalement(self, jeton: str, asset: str) -> int:
+        """Changer d'avis : l'avis en attente de cette invitation sur cette photo disparaît (un avis traité reste)."""
+        with self._verrou, self._c:
+            return self._c.execute("DELETE FROM signalement WHERE jeton = ? AND asset = ? AND traite_le IS NULL",
+                                   (jeton, asset)).rowcount
+
+    @staticmethod
+    def _avis(l: sqlite3.Row) -> dict:
+        return {"id": l["id"], "jeton": l["jeton"], "asset": l["asset"], "annee": l["annee"], "environ": bool(l["environ"]),
+                "mot": l["mot"], "date_affichee": l["date_affichee"], "invites": json.loads(l["invites"]),
+                "personnes": json.loads(l["personnes"]), "le": l["le"], "traite_le": l["traite_le"], "issue": l["issue"]}
+
+    def signalements_de(self, jeton: str) -> list[dict]:
+        """Tous les avis d'une invitation (en attente et traités), du plus ancien au plus récent."""
+        with self._verrou:
+            return [self._avis(l) for l in self._c.execute("SELECT * FROM signalement WHERE jeton = ? ORDER BY le, rowid", (jeton,))]
+
+    def signalements_en_attente(self) -> list[dict]:
+        """Les avis pas encore traités, toutes invitations (expirées comprises), du plus ancien au plus récent."""
+        with self._verrou:
+            return [self._avis(l) for l in self._c.execute("SELECT * FROM signalement WHERE traite_le IS NULL ORDER BY le, rowid")]
+
+    def traiter(self, asset: str, issue: str) -> tuple[int, list[str]]:
+        """Ferme tous les avis en attente de cette photo (toutes invitations). Rejouable : la deuxième fois, rien à fermer.
+        Rend le nombre d'avis fermés et les personnes des invitations concernées."""
+        if issue not in ISSUES:
+            raise ValueError(issue)
+        with self._verrou, self._c:
+            lignes = self._c.execute("SELECT personnes FROM signalement WHERE asset = ? AND traite_le IS NULL", (asset,)).fetchall()
+            self._c.execute("UPDATE signalement SET traite_le = ?, issue = ? WHERE asset = ? AND traite_le IS NULL",
+                            (maintenant_tz(), issue, asset))
+        return len(lignes), list(dict.fromkeys(p for l in lignes for p in json.loads(l["personnes"])))
+
+    def effacer_traites(self, jours: int = 90, maintenant: datetime | None = None) -> int:
+        """Les avis traités depuis plus de `jours` jours sont effacés. Rend le nombre d'avis effacés."""
+        limite = (maintenant or datetime.now().astimezone()) - timedelta(days=jours)
+        with self._verrou, self._c:
+            vieux = [(l["id"],) for l in self._c.execute("SELECT id, traite_le FROM signalement WHERE traite_le IS NOT NULL")
+                     if quand_tz(l["traite_le"]) <= limite]
+            self._c.executemany("DELETE FROM signalement WHERE id = ?", vieux)
+        return len(vieux)

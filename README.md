@@ -2,7 +2,7 @@
 
 Le chemin de vie d'une personne, lu dans Immich : ses photos rangées en étapes, les étapes en chapitres d'âge. Ancien nom : Frise.
 
-**État : 0.16.0. Sillage ne fait que lire Immich ; les corrections et les réglages sont gardés chez lui.** Voir [`REPRISE.md`](REPRISE.md) et [`docs/dossier.md`](docs/dossier.md).
+**État : 0.17.0. Sillage ne fait que lire Immich ; les corrections et les réglages sont gardés chez lui.** Voir [`REPRISE.md`](REPRISE.md) et [`docs/dossier.md`](docs/dossier.md).
 
 ## Ce que fait Sillage
 
@@ -31,6 +31,20 @@ Variables lues : `MAISON_PASSWORD`, `MAISON_JETON` (communes à la maison), `SIL
 - `GET /externe/sauvegarde` (jeton commun `MAISON_JETON` ; vide : adresse fermée) rend les réglages à l'Anneau, qui les garde chaque nuit. Jamais de variable, de chemin ni de secret.
 - **Restaurer les réglages** (écran Réglages) : choisir une date gardée par l'Anneau, voir les différences, confirmer.
 - Lien « Ouvrir dans Immich » : l'adresse de la tuile « Immich » de l'Anneau ; sinon le même hôte que Sillage, port 2283.
+
+## Dates signalées par les invités (0.17)
+
+- Sur sa page (`/invite/<jeton>`), sous chaque photo du chemin et de « Voir l'album », l'invité trouve « Pas la bonne année ? » : « Vers quelle année ? » (1900 à l'année en cours), case « environ », « Un souvenir pour situer » (facultatif, 120 caractères, texte brut). La photo reste en place avec la marque « signalé » et « Changer d'avis » tant que l'avis n'est pas traité. Écarté par Julien : « Julien a regardé, la date reste » pendant 30 jours. Merci : « Grâce à vous, N photos ont retrouvé leur année. »
+- En bas de la page, **« Aidez-moi à dater »** : jusqu'à 12 photos où un invité figure et qui restent hors du chemin faute de date (tag des scans non datés, sans estimation de Millésime).
+- Un avis en attente par invitation et par photo (renvoyer remplace) ; **100 avis en attente par invitation** au plus (au-delà : 429, « Julien a déjà beaucoup de photos à regarder : revenez un peu plus tard. »). Avis traités effacés 90 jours après leur traitement (au démarrage et chaque nuit). Les avis d'une invitation expirée restent jusqu'à leur traitement.
+- Côté invité, une photo est nommée par un **identifiant propre à Sillage** (24 caractères, HMAC de l'invitation et de la photo, clé tirée une fois et gardée dans `sillage.db`) : jamais l'identifiant Immich, ni dans les réponses ni dans les adresses (`/api/invite/<jeton>/vignette/<id>`, `/album/<id>`, `/signalement/<id>`).
+- Routes invité (sans mot de passe, le jeton de l'invitation ouvre) : `POST /api/invite/<jeton>/signalement/<id>` (`{"annee": 1987, "environ": true, "mot": "…"}`) et `DELETE` de la même adresse (changer d'avis). Réponse : `{"signalements": {<id>: {"etat": "signale" | "regardee", …}}, "photos_redatees": N}`.
+- Sillage n'écrit toujours rien dans Immich : **Millésime** lit les avis et, sur « Accepter » de Julien, écrit la date. Un récit gardé est marqué « à revoir » quand un avis d'une photo de la personne est accepté ou corrigé (bandeau dans « Raconter », effacé en gardant le texte).
+
+### Contrat 1 avec Millésime (jeton commun `MAISON_JETON` ; vide : adresse fermée, 404)
+
+- `GET /externe/signalements` → `{"contrat": 1, "signalements": [{"id": "<id Sillage>", "asset": "<id Immich>", "annee": 1987, "environ": true, "mot": "baptême…", "date_affichee": "1985-07-01" | null, "invites": ["Prénom", …], "le": "2026-11-18T10:00:00+01:00"}]}` : seulement les avis non traités. `date_affichee` : la date que l'invité voyait (null pour une photo pas encore datée, dont « Aidez-moi à dater »).
+- `POST /externe/signalements/traite` avec `{"asset": "<id Immich>", "issue": "acceptee" | "corrigee" | "ecartee"}` → `{"fermes": n}` : ferme tous les avis non traités de cette photo (toutes invitations) ; rejouable (deuxième appel : `{"fermes": 0}`, code 200).
 
 ## Tests
 

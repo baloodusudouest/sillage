@@ -42,6 +42,11 @@ def etapes(reponse):
     return [e for ch in reponse["chapitres"] for e in ch["etapes"]]
 
 
+def op(jeton, nom):
+    """0.17 : l'identifiant opaque qu'un invité voit pour la photo inventée « nom » (jamais l'identifiant Immich)."""
+    return main._opaque(jeton, ident(nom))
+
+
 def test_rien_sans_mot_de_passe(monde):
     client, faux = monde
     assert client.get("/health").json()["ok"] is True
@@ -329,10 +334,12 @@ def test_l_invite_seul_voit_son_chemin(monde):
     (c,) = r["chacun"]
     assert [ch["titre"] for ch in c["chapitres"]] == ["0 à 9 ans", "30 à 39 ans"]       # seul : par âge
     e = c["chapitres"][0]["etapes"][0]
-    assert set(e) == {"cle", "nom", "debut", "fin", "quand", "fois", "age", "vers", "nombre", "phare", "temps_fort"}   # pas la liste des photos
+    assert set(e) == {"cle", "nom", "debut", "fin", "quand", "fois", "age", "vers", "nombre", "phare", "temps_fort", "annee"}   # pas la liste des photos
     assert "immich" not in r and "de_cote" not in c
+    assert e["phare"] == op(jeton, "bapteme2") and e["annee"] == 1987                # 0.17 : identifiant opaque
     assert client.get(f"/api/invite/{jeton}/vignette/{e['phare']}").status_code == 200
-    assert client.get(f"/api/invite/{jeton}/vignette/{ident('bapteme1')}").status_code == 404   # pas une photo phare
+    assert client.get(f"/api/invite/{jeton}/vignette/{op(jeton, 'bapteme1')}").status_code == 404   # pas une photo phare
+    assert client.get(f"/api/invite/{jeton}/vignette/{ident('bapteme2')}").status_code == 404       # 0.17 : plus par l'id Immich
     assert client.get(f"/api/invite/autre-jeton/vignette/{e['phare']}").status_code == 404
 
 
@@ -374,7 +381,8 @@ def test_personne_trouvee_le_mot_d_accueil(monde):
     r = sejour(client, h, noms=["Personne INCONNUE"])
     assert r["trouves"] == [] and r["chemin"]
     inv = client.get("/api" + r["chemin"]).json()
-    assert inv == {"invites": ["Personne INCONNUE"], "commun": None, "chacun": [], "accueil": True}
+    assert inv == {"invites": ["Personne INCONNUE"], "commun": None, "chacun": [], "accueil": True,
+                   "aidez": [], "signalements": {}, "photos_redatees": 0}
 
 
 def test_invitation_expiree(monde):
@@ -511,19 +519,20 @@ def test_0_12_l_album_d_une_photo(monde, c):
     jeton = sejour(client, avec_jeton_ha(), noms=["Camille ROUSSEL"])["chemin"].split("/")[-1]
     r = client.get(f"/api/invite/{jeton}").json()
     phares = {e["phare"] for ch in r["chacun"][0]["chapitres"] for e in ch["etapes"]}
-    phare = next(p for p in phares if p in faux.albums)
+    phare = next(p for p in phares if p in {op(jeton, n) for n in ("mariage1", "mariage2", "tiers")})
     a = client.get(f"/api/invite/{jeton}/album/{phare}").json()
-    assert a["nom"] == nom and ident("tiers") not in [p["id"] for p in a["photos"]] and ident("mariage1") in [p["id"] for p in a["photos"]]
-    assert client.get(f"/api/invite/{jeton}/vignette/{ident('mariage1')}?petite=true").status_code == 200
-    assert client.get(f"/api/invite/{jeton}/vignette/{ident('tiers')}").status_code == 404
-    assert client.get(f"/api/invite/{jeton}/album/{ident('tiers')}").status_code == 404   # pas une photo phare
+    assert a["nom"] == nom and op(jeton, "tiers") not in [p["id"] for p in a["photos"]] and op(jeton, "mariage1") in [p["id"] for p in a["photos"]]
+    assert {p["annee"] for p in a["photos"]} == {2019}                                    # 0.17 : l'année que l'invité voit
+    assert client.get(f"/api/invite/{jeton}/vignette/{op(jeton, 'mariage1')}?petite=true").status_code == 200
+    assert client.get(f"/api/invite/{jeton}/vignette/{op(jeton, 'tiers')}").status_code == 404
+    assert client.get(f"/api/invite/{jeton}/album/{op(jeton, 'tiers')}").status_code == 404   # pas une photo phare
     # 0.12.1 : une étape hors de tout album (nom tiré du dossier) : « Voir l'album » montre ses propres photos
     faux.albums = {}
     main.ETAT["invites"].clear()
     r = client.get(f"/api/invite/{jeton}").json()
     bapteme = next(e for ch in r["chacun"][0]["chapitres"] for e in ch["etapes"] if e["nom"] == "Baptême de Camille")
     a = client.get(f"/api/invite/{jeton}/album/{bapteme['phare']}").json()
-    assert a["nom"] == "" and set(p["id"] for p in a["photos"]) == {ident("bapteme1"), ident("bapteme2")}   # la vidéo n'est pas servie
+    assert a["nom"] == "" and set(p["id"] for p in a["photos"]) == {op(jeton, "bapteme1"), op(jeton, "bapteme2")}   # la vidéo n'est pas servie
     assert all(client.get(f"/api/invite/{jeton}/vignette/{p['id']}?petite=true").status_code == 200 for p in a["photos"])
 
 
@@ -542,8 +551,9 @@ def test_la_frise_est_prete_des_que_l_invite_est_saisi(monde):
     _attendre_le_fond()
     garde_, le = main.ETAT["base"].frise(jeton)
     assert le and garde_["chacun"][0]["etapes"] == 3
-    phare = garde_["chacun"][0]["chapitres"][0]["etapes"][0]["phare"]
+    phare = garde_["chacun"][0]["chapitres"][0]["etapes"][0]["phare"]                  # gardée dans la base : l'id Immich
     assert main.ETAT["cache"].lire(f"{phare}-preview")                                  # photo phare déjà sur disque
+    phare = main._opaque(jeton, phare)                                                  # 0.17 : l'invité, lui, voit l'opaque
     assert client.get("/health").json()["frises_pretes"] == 1
     main.ETAT["invites"].clear()                                                         # comme après un redémarrage
     avant = len(faux.demandes)
@@ -943,20 +953,22 @@ def test_m25_voir_l_album_de_l_invite_suit_le_filtre_du_chemin(monde):
     # Seul : le chemin prend toutes ses photos visibles (sans filtre des hôtes), jamais une archivée ou masquée
     jeton = sejour(client, h, noms=["Camille ROUSSEL"])["chemin"].split("/")[-1]
     r = client.get(f"/api/invite/{jeton}").json()
-    phare = next(e["phare"] for ch in r["chacun"][0]["chapitres"] for e in ch["etapes"] if e["phare"] in faux.albums)
+    dans_album = {main._opaque(jeton, i) for i in faux.albums}
+    phare = next(e["phare"] for ch in r["chacun"][0]["chapitres"] for e in ch["etapes"] if e["phare"] in dans_album)
     ids = {p["id"] for p in client.get(f"/api/invite/{jeton}/album/{phare}").json()["photos"]}
-    assert ident("mariage1") in ids and ident("foule") in ids
-    assert not ids & {ident("archive"), ident("verrou"), ident("masquee")}
+    assert op(jeton, "mariage1") in ids and op(jeton, "foule") in ids
+    assert not ids & {op(jeton, "archive"), op(jeton, "verrou"), op(jeton, "masquee")}
     for cachee in ("archive", "verrou", "masquee"):
-        assert client.get(f"/api/invite/{jeton}/vignette/{ident(cachee)}").status_code == 404
+        assert client.get(f"/api/invite/{jeton}/vignette/{op(jeton, cachee)}").status_code == 404
     # À deux : la photo avec quelqu'un d'autre n'est pas servie non plus
     jeton = sejour(client, h, chambre="ado", noms=["Camille ROUSSEL", "Hugo MARCHAND"])["chemin"].split("/")[-1]
     r = client.get(f"/api/invite/{jeton}").json()
-    phare = next(e["phare"] for ch in r["commun"]["chapitres"] for e in ch["etapes"] if e["phare"] in faux.albums)
+    dans_album = {main._opaque(jeton, i) for i in faux.albums}
+    phare = next(e["phare"] for ch in r["commun"]["chapitres"] for e in ch["etapes"] if e["phare"] in dans_album)
     ids = {p["id"] for p in client.get(f"/api/invite/{jeton}/album/{phare}").json()["photos"]}
-    assert ident("mariage1") in ids and ident("mariage2") in ids
-    assert not ids & {ident("archive"), ident("verrou"), ident("masquee"), ident("foule")}
-    assert client.get(f"/api/invite/{jeton}/vignette/{ident('foule')}").status_code == 404
+    assert op(jeton, "mariage1") in ids and op(jeton, "mariage2") in ids
+    assert not ids & {op(jeton, "archive"), op(jeton, "verrou"), op(jeton, "masquee"), op(jeton, "foule")}
+    assert client.get(f"/api/invite/{jeton}/vignette/{op(jeton, 'foule')}").status_code == 404
 
 
 def test_m26_les_photos_gardees_en_memoire_sont_bornees(c, monkeypatch):
