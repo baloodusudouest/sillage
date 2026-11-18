@@ -45,6 +45,10 @@ Variables lues : `MAISON_PASSWORD`, `MAISON_JETON` (communes à la maison), `SIL
 - `GET /externe/signalements` → `{"contrat": 1, "signalements": [{"id": "<id Sillage>", "asset": "<id Immich>", "annee": 1987, "environ": true, "mot": "baptême…", "date_affichee": "1985-07-01" | null, "invites": ["Prénom", …], "le": "2026-11-18T10:00:00+01:00"}]}` : seulement les avis non traités. `date_affichee` : la date que l'invité voyait (null pour une photo pas encore datée, dont « Aidez-moi à dater »).
 - `POST /externe/signalements/traite` avec `{"asset": "<id Immich>", "issue": "acceptee" | "corrigee" | "ecartee"}` → `{"fermes": n}` : ferme tous les avis non traités de cette photo (toutes invitations) ; rejouable (deuxième appel : `{"fermes": 0}`, code 200).
 
+### Contrat 1 avec la Gazette (0.20 ; jeton commun `MAISON_JETON` ; vide : adresse fermée, 404)
+
+- `GET /externe/personnes/<id Immich>/etapes` → `{"contrat": 1, "etapes": [{"nom": "Baptême de Camille", "annee": 1987, "photos": 3}]}` : les étapes nommées du chemin de cette personne, pour les suggestions « à valider » de la fiche complète de la Gazette. Mêmes règles que le chemin (photos visibles seulement, corrections de Julien comprises) ; étapes masquées et étapes sans nom écartées ; les plus fournies d'abord (à égalité, la plus ancienne), **60 au plus**. Personne inconnue de Sillage (ou identifiant mal formé) : `{"contrat": 1, "etapes": []}`, code 200. Lecture seule.
+
 ## Tests
 
 ```

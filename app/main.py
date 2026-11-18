@@ -5,6 +5,7 @@ Routes : /health (publique), /api/session, /api/connexion, /api/deconnexion, /ap
 /api/vignette/{photo}, /api/services, /api/reglages, /api/restaurer, /externe/sauvegarde (jeton commun), puis l'interface.
 Invités : /api/invite/{jeton} (et /album/{photo}, /vignette/{photo}, /signalement/{photo}).
 Millésime : /externe/signalements et /externe/signalements/traite (jeton commun).
+Gazette : /externe/personnes/{immich_id}/etapes (jeton commun, 0.20).
 
 0.17 : les invités signalent une date fausse (« Pas la bonne année ? ») ou datent une photo de « Aidez-moi à dater ».
 Côté invité, une photo n'est jamais nommée par son identifiant Immich : identifiant opaque propre à Sillage
@@ -73,6 +74,7 @@ AIDEZ_MAX = 12                            # photos de « Aidez-moi à dater »
 MOT_MAX = 120                             # longueur du mot libre d'un avis
 GARDE_TRAITES = 90                        # jours pendant lesquels un avis traité reste avant d'être effacé
 REGARDEE_JOURS = 30                       # jours pendant lesquels l'invité lit « Julien a regardé, la date reste »
+ETAPES_MAX = 60                           # 0.20 : étapes rendues à la Gazette par /externe/personnes/…/etapes
 MERCI = "Merci, c'est transmis à Julien"
 TROP = "Julien a déjà beaucoup de photos à regarder : revenez un peu plus tard."
 
@@ -357,6 +359,14 @@ def _chemin(personne: str, frais: bool = False, hote: str = "") -> dict:
     fiche = _personnes().get(personne)
     if not fiche:
         raise HTTPException(404, "Personne inconnue de Sillage.")
+    resultat = _calcul_du_chemin(personne, fiche, frais)
+    resultat["immich"] = adresse_immich(hote)                    # annuaire de l'Anneau
+    resultat["immich_port"] = IMMICH_PORT                          # 0.16 : repli sans variable, calculé par l'interface
+    return resultat
+
+
+def _calcul_du_chemin(personne: str, fiche: dict, frais: bool = False) -> dict:
+    """0.20 : le calcul du chemin seul (sans l'adresse d'Immich), pour l'écran et pour /externe/personnes/…/etapes."""
     garde_ = ETAT["lues"].get(personne)
     if not garde_ or frais or time.monotonic() - garde_[0] > MEMOIRE:
         if frais:
@@ -371,11 +381,8 @@ def _chemin(personne: str, frais: bool = False, hote: str = "") -> dict:
                 del lues[next(iter(lues))]             # la plus anciennement lue part
             ETAT["connues"].update({p["id"]: p.get("checksum") or "" for p in garde_[1] if calcul.visible(p)})
     estimees, non_datees = _reperes()
-    resultat = calcul.calculer(fiche, garde_[1], _noms_d_albums, _mots(), ETAT["base"].marques(personne), _muets(),
-                               estimees=estimees, non_datees=non_datees)
-    resultat["immich"] = adresse_immich(hote)                    # annuaire de l'Anneau
-    resultat["immich_port"] = IMMICH_PORT                          # 0.16 : repli sans variable, calculé par l'interface
-    return resultat
+    return calcul.calculer(fiche, garde_[1], _noms_d_albums, _mots(), ETAT["base"].marques(personne), _muets(),
+                           estimees=estimees, non_datees=non_datees)
 
 
 @app.get("/api/chemin/{personne}")
@@ -980,6 +987,24 @@ def signalement_traite(request: Request, corps: dict = Body(...)):
         raise HTTPException(422, "« issue » : acceptee, corrigee ou ecartee.")
     fermes, _personnes = ETAT["base"].traiter(asset, issue)
     return {"fermes": fermes}
+
+
+# ================================================================ étapes d'une personne, pour la Gazette (0.20)
+
+@app.get("/externe/personnes/{immich_id}/etapes")
+def etapes_de(immich_id: str, request: Request):
+    """Contrat 1 avec la Gazette (fiche complète d'une personne) : les étapes nommées du chemin de cette personne,
+    mêmes règles que le chemin (photos visibles seulement, corrections de Julien comprises, étapes masquées et sans nom
+    écartées), les plus fournies d'abord, 60 au plus. Personne inconnue de Sillage : liste vide (pas d'erreur)."""
+    _porte_commune(request)
+    fiche = _personnes().get(immich_id) if UUID.match(immich_id) else None
+    if not fiche:
+        return {"contrat": 1, "etapes": []}
+    toutes = [e for ch in _calcul_du_chemin(immich_id, fiche)["chapitres"] for e in ch["etapes"]
+              if e["nom"].strip() and not e["masquee"]]
+    toutes.sort(key=lambda e: (-e["nombre"], e["debut"]))
+    return {"contrat": 1, "etapes": [{"nom": e["nom"], "annee": int(e["debut"][:4]), "photos": e["nombre"]}
+                                     for e in toutes[:ETAPES_MAX]]}
 
 
 # ================================================================ images (derrière la session)

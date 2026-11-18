@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 0.20.0 — 18 novembre 2026 (étapes d'une personne pour la Gazette)
+- **`GET /externe/personnes/{immich_id}/etapes`** (jeton commun, contrat 1) pour la fiche complète d'une personne dans la Gazette : `{"contrat": 1, "etapes": [{"nom", "annee", "photos"}]}`. Les étapes du chemin de cette personne, mêmes règles que le chemin (photos visibles seulement, corrections de Julien comprises), sans les étapes masquées ni celles sans nom ; les plus fournies d'abord, 60 au plus. Personne inconnue : liste vide (code 200). Rien n'est écrit, ni dans Immich ni dans la base.
+- Le calcul du chemin est mis à part (`_calcul_du_chemin`) pour servir à l'écran et à cette adresse ; l'écran ne change pas.
+- Jamais essayé sur la vraie installation (ni la lecture par la Gazette 0.23, ni le temps de calcul d'un long chemin appelé de l'extérieur).
+- Tests : 78 du serveur (5 nouveaux, `tests/test_etapes_externes.py`).
+
 ## 0.19.0 — 18 novembre 2026 (Raconter retiré)
 - **« Raconter » retiré** (choix de Julien du 18/11/2026, après l'essai des IA du PC sur un chemin : aucun modèle ne tient « rien d'inventé », et le gabarit n'apporte pas assez). Plus de page Récit ni de bouton « Raconter » sur le chemin ; `GET` et `PUT /api/recit/{personne}` répondent 404 ; module `app/recit.py` supprimé (rien d'autre ne s'en servait).
 - **Plus de marque « à revoir »** : un avis d'invité accepté ou corrigé dans Millésime ferme l'avis, sans lire la photo dans Immich (`GET /assets/{id}` n'est plus demandé) ni toucher aux récits.
