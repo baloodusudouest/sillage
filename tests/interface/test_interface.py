@@ -207,9 +207,17 @@ def test_corriger_une_etape_et_une_photo(page):
 
 
 def test_connexion_et_reglages(page):
+    # 0.21 : écran commun des fiches « Connexion » (4 services : des tuiles, la fiche s'ouvre au toucher)
     page.goto(page.base + "/#/connexion")
+    page.locator("#tuile-immich").click()
+    page.get_by_role("button", name="Vérifier").click()
     page.get_by_text("Répond, version 3.4.1. 2 personnes nommées.").wait_for()
+    sans_debordement(page)
+    page.locator("#tuile-millesime").click()
+    page.get_by_role("button", name="Vérifier").click()
     page.get_by_text("2 scans datés par estimation, dits « vers … » ; 1 en attente de date, hors du chemin.").wait_for()   # 0.14
+    page.locator("#tuile-carnet").click()
+    page.get_by_text("MAISON_JETON (jeton commun de la maison)").wait_for()       # pas relié : la variable de la stack
     page.goto(page.base + "/#/reglages")
     from app import __version__
     page.get_by_text(f"Sillage {__version__}").wait_for()

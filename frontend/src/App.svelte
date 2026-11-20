@@ -11,7 +11,7 @@
   import Sillages from './pages/Sillages.svelte'
   import Chemin from './pages/Chemin.svelte'
   import Invite from './pages/Invite.svelte'
-  import Services from './pages/Services.svelte'
+  import Services from '$lib/services/Services.svelte'   // 0.21.0 : écran commun (contrat 3, socle 0.11.0)
   import Chambres from './pages/Chambres.svelte'
   import Reglages from './pages/Reglages.svelte'
 
@@ -96,7 +96,7 @@
           {:else if route.page === 'chambres'}
             <Chambres ondeconnecte={dehors} />
           {:else if route.page === 'connexion'}
-            <Services ondeconnecte={dehors} />
+            <Services etiquette="Sillage" ondeconnecte={dehors} />
           {:else if route.page === 'reglages'}
             <Reglages {session} {deconnecter} />
           {:else}

@@ -1,5 +1,14 @@
 # Journal des versions
 
+## 0.21.0 — 20 novembre 2026 (fiches « Connexion » communes, contrat 3)
+- L'écran « Connexion » passe à l'écran commun des applis maison (socle 0.11.0, `$lib/services/`) : quatre services, donc des tuiles à voyant ; la fiche s'ouvre au toucher (Ce qui est lu, Ce qui est écrit, Pour le relier, Vérifier). « Vérifier » ne teste que son service et l'âge du dernier essai est affiché ; l'ouverture de l'écran ne lance plus aucune lecture.
+- Fiches : **Immich** (lit la version), **carnet** (relit la liste des fiches liées), **Scans de Millésime** (lit la liste des tags d'Immich ; les nombres de scans « vers … » et en attente sont ceux du dernier calcul du chemin), **Chambre noire** (relit le tag des scans non datés ; fiche à part, elle n'était qu'une ligne sous Millésime). Textes « lit » et « écrit » repris de l'ancien écran. Aucun geste : Sillage ne fait que lire.
+- Serveur : registre `SERVICES` (`maison.Services`), `GET /api/maison/services` et `POST /api/maison/services/{id}/verifier` (session ou `ANNEAU_CLE`, au plus un essai toutes les 30 s par service, rien d'écrit). La fiche « État » de l'Anneau les lit.
+- `maison.py` du socle 0.11.0 (contrat 3). Nouvelle variable facultative `ANNEAU_CLE` (compose, `.env.example`).
+- L'ancienne route `GET /api/services` reste telle quelle en 0.21.0 (plus lue par l'interface) : **à retirer à la version suivante (0.22.0)**. `pages/Services.svelte` est retiré.
+- Tests : 84 du serveur (`tests/test_fiches_connexion.py`, 6 nouveaux ; version du socle 0.11.0 dans `tests/test_sante.py`), 26 d'écran (le parcours de Connexion passe par les tuiles et « Vérifier »).
+- **Jamais essayé sur la vraie installation.**
+
 ## 0.20.0 — 18 novembre 2026 (étapes d'une personne pour la Gazette)
 - **`GET /externe/personnes/{immich_id}/etapes`** (jeton commun, contrat 1) pour la fiche complète d'une personne dans la Gazette : `{"contrat": 1, "etapes": [{"nom", "annee", "photos"}]}`. Les étapes du chemin de cette personne, mêmes règles que le chemin (photos visibles seulement, corrections de Julien comprises), sans les étapes masquées ni celles sans nom ; les plus fournies d'abord, 60 au plus. Personne inconnue : liste vide (code 200). Rien n'est écrit, ni dans Immich ni dans la base.
 - Le calcul du chemin est mis à part (`_calcul_du_chemin`) pour servir à l'écran et à cette adresse ; l'écran ne change pas.

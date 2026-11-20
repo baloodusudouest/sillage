@@ -2,7 +2,8 @@
 
 Routes : /health (publique), /api/session, /api/connexion, /api/deconnexion, /api/personnes,
 /api/chemin/{personne} (et /marque), /api/portrait/{personne},
-/api/vignette/{photo}, /api/services, /api/reglages, /api/restaurer, /externe/sauvegarde (jeton commun), puis l'interface.
+/api/vignette/{photo}, /api/services (ancienne forme, à retirer en 0.22), /api/maison/services (contrat 3),
+/api/reglages, /api/restaurer, /externe/sauvegarde (jeton commun), puis l'interface.
 Invités : /api/invite/{jeton} (et /album/{photo}, /vignette/{photo}, /signalement/{photo}).
 Millésime : /externe/signalements et /externe/signalements/traite (jeton commun).
 Gazette : /externe/personnes/{immich_id}/etapes (jeton commun, 0.20).
@@ -1066,6 +1067,8 @@ def video(photo: str, request: Request):
 
 @app.get("/api/services")
 def services():
+    """ANCIENNE forme de l'écran Connexion (jusqu'à 0.20.0), gardée telle quelle en 0.21.0 seulement : à retirer à la
+    version suivante (0.22.0). L'écran lit maintenant /api/maison/services (contrat 3, section « fiches Connexion »)."""
     try:
         version, erreur = ETAT["immich"].version(), ""
         nombre = len(_personnes(frais=True))
@@ -1079,6 +1082,88 @@ def services():
                                                    "lu": False, "erreur": "", "estimees": 0, "non_datees": 0,
                                                    "tag_non_datee": _reglage("tag_non_datee"), "source": "", "chambre_noire": ""}),
             "cache": ETAT["cache"].place()}
+
+
+# ================================================================ fiches « Connexion » (0.21.0, contrat 3, socle 0.11.0)
+# GET /api/maison/services et POST /api/maison/services/{id}/verifier (session ou ANNEAU_CLE) : écran commun
+# $lib/services/Services.svelte, et fiche « État » de l'Anneau. Essais légers, une lecture courte chacun, rien d'écrit :
+# Immich rend sa version, carnet la liste des fiches liées, Immich la liste de ses tags (scans de Millésime),
+# Chambre noire son tag des scans non datés. Sillage ne fait que lire : aucun geste.
+
+def _pluriel(n: int, un: str, plusieurs: str) -> str:
+    return f"{n} {un if n <= 1 else plusieurs}"
+
+
+def _essai_immich():
+    detail = f"Répond, version {ETAT['immich'].version()}."
+    garde_ = ETAT.get("personnes")          # le nombre de personnes déjà lu (aucune lecture de plus pour l'essai)
+    if garde_:
+        detail += f" {_pluriel(len(garde_[1]), 'personne nommée', 'personnes nommées')}."
+    return True, detail
+
+
+def _essai_carnet():
+    fiches, erreur = _de_carnet()
+    if erreur:
+        return False, erreur
+    return True, f"Répond. {_pluriel(len(fiches), 'fiche liée', 'fiches liées')} à une personne d'Immich."
+
+
+def _essai_millesime():
+    """Une lecture : la liste des tags d'Immich. Les nombres de scans sont ceux du dernier calcul du chemin."""
+    tags = [t.get("value") or "" for t in ETAT["immich"].etiquettes()]
+    tag_estimee = str(_reglage("tag_estimee") or "").strip().rstrip("/")
+    etat = ETAT.get("reperes_etat") or {}
+    tag_non_datee = str(_reglage("tag_non_datee") or "").strip() or etat.get("tag_non_datee") or ""
+    if tag_non_datee and tag_non_datee not in tags:
+        d_ou = "réglé dans Réglages" if _reglage("tag_non_datee") else "donné par Chambre noire"
+        return False, f"Le tag des scans non datés {d_ou} est introuvable dans Immich."
+    if etat.get("lu"):
+        return True, (f"{_pluriel(etat['estimees'], 'scan daté', 'scans datés')} par estimation, dits « vers … » ; "
+                      f"{etat['non_datees']} en attente de date, hors du chemin.")
+    n = sum(1 for v in tags if tag_estimee and calcul.estimation(v, tag_estimee))
+    return True, f"Tags lisibles : {_pluriel(n, 'tag', 'tags')} d'estimation dans Immich."
+
+
+def _essai_chambre_noire():
+    tag, raison = _tag_de_chambre_noire()
+    if raison:
+        return False, raison
+    if _reglage("tag_non_datee"):
+        return True, "Répond. Réglages donne déjà le tag des scans non datés : celui de Chambre noire n'est pas pris."
+    return True, f"Répond. Scans non datés : tag « {tag} »." if tag else "Répond, sans tag des scans non datés réglé."
+
+
+SERVICES = maison.Services(APPLI)
+SERVICES.ajouter(
+    "immich", "Immich",
+    lit="Sillage lit dans Immich les personnes, leurs photos, le nom des albums et les vignettes.",
+    ecrit="Il n'y écrit rien : sa clé peut être limitée à la lecture.",
+    regle=lambda: bool(ETAT["cfg"].immich_url and ETAT["cfg"].immich_cle),
+    reglage="SILLAGE_IMMICH_URL et SILLAGE_IMMICH_CLE", essai=_essai_immich)
+SERVICES.ajouter(
+    "carnet", "carnet", genre="maison", cible="carnet",
+    lit="Sillage lit dans carnet la liste des fiches liées à Immich (nom, groupes). Pas réglé ou sans réponse : "
+        "la liste d'ouverture est celle des personnes nommées d'Immich.",
+    ecrit="Il n'y écrit rien.",
+    regle=lambda: bool(ETAT["cfg"].jeton), reglage="MAISON_JETON (jeton commun de la maison)", essai=_essai_carnet)
+SERVICES.ajouter(
+    "millesime", "Scans de Millésime", genre="maison", cible="millesime",
+    lit="Sillage lit dans Immich les tags que Millésime pose sur les scans : le début des tags d'estimation et le tag "
+        "complet des scans non datés, réglés dans Réglages (vide : celui de Chambre noire). La clé d'API doit pouvoir "
+        "lire les tags. Pas réglé : les scans sont pris avec la date qu'ils portent dans Immich.",
+    ecrit="Rien n'est écrit.",
+    regle=lambda: bool(_reglage("tag_estimee") or _reglage("tag_non_datee") or ETAT["cfg"].jeton),
+    reglage="MAISON_JETON (tag de Chambre noire), ou les tags dans Réglages", essai=_essai_millesime)
+SERVICES.ajouter(
+    "chambre-noire", "Chambre noire", genre="maison", cible="chambre-noire",
+    lit="Le tag des scans non datés que pose Chambre noire, quand Réglages le laisse vide. Sans lui, le tag des scans "
+        "non datés n'est pas lu.",
+    ecrit="Rien.",
+    regle=lambda: bool(ETAT["cfg"].jeton), reglage="MAISON_JETON (jeton commun de la maison)",
+    essai=_essai_chambre_noire)
+# Monté APRÈS la garde : le dernier middleware ajouté passe en premier.
+maison.monter_services(app, SERVICES, lambda r: "sessions" in ETAT and ETAT["sessions"].connecte(r.cookies))
 
 
 # ================================================================ interface
