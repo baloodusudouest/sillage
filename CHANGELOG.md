@@ -1,5 +1,9 @@
 # Journal des versions
 
+## 0.21.1 — 20 novembre 2026 (socle 0.11.1)
+- Copies communes du socle 0.11.1 : sur une fiche « Connexion », le titre devient « Pour le relier » quand le réglage se fait dans Réglages de l'appli (et non dans la stack).
+- **Jamais essayé sur la vraie installation.**
+
 ## 0.21.0 — 20 novembre 2026 (fiches « Connexion » communes, contrat 3)
 - L'écran « Connexion » passe à l'écran commun des applis maison (socle 0.11.0, `$lib/services/`) : quatre services, donc des tuiles à voyant ; la fiche s'ouvre au toucher (Ce qui est lu, Ce qui est écrit, Pour le relier, Vérifier). « Vérifier » ne teste que son service et l'âge du dernier essai est affiché ; l'ouverture de l'écran ne lance plus aucune lecture.
 - Fiches : **Immich** (lit la version), **carnet** (relit la liste des fiches liées), **Scans de Millésime** (lit la liste des tags d'Immich ; les nombres de scans « vers … » et en attente sont ceux du dernier calcul du chemin), **Chambre noire** (relit le tag des scans non datés ; fiche à part, elle n'était qu'une ligne sous Millésime). Textes « lit » et « écrit » repris de l'ancien écran. Aucun geste : Sillage ne fait que lire.
