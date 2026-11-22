@@ -1,5 +1,5 @@
 <script>
-  // Sillage : rail à gauche sur PC, pilule d'icônes en bas sur iPhone (format commun des applis).
+  // Sillage : rail à gauche sur PC, barre d'icônes collée en bas sur iPhone (format commun des applis).
   import { onMount } from 'svelte'
   import { fly } from 'svelte/transition'
   import Waves from '@lucide/svelte/icons/waves'
@@ -64,8 +64,8 @@
   <div class="md:pl-52">
     <nav
       aria-label="Sections"
-      class="fixed bottom-[calc(0.75rem+env(safe-area-inset-bottom))] left-1/2 z-20 flex -translate-x-1/2 items-center gap-1 rounded-full border bg-card/80 p-1.5 shadow-lg backdrop-blur-md
-             md:inset-y-0 md:left-0 md:w-52 md:translate-x-0 md:flex-col md:items-stretch md:gap-1 md:rounded-none md:border-0 md:border-r md:bg-transparent md:p-4 md:shadow-none md:backdrop-blur-none"
+      class="fixed inset-x-0 bottom-0 z-20 flex items-center justify-around gap-1 border-t bg-card/95 px-2 pt-1.5 pb-[calc(0.375rem+env(safe-area-inset-bottom))] backdrop-blur-md
+             md:inset-y-0 md:left-0 md:right-auto md:justify-start md:w-52 md:translate-x-0 md:flex-col md:items-stretch md:gap-1 md:rounded-none md:border-0 md:border-r md:bg-transparent md:p-4 md:shadow-none md:backdrop-blur-none"
     >
       <span class="mb-4 hidden items-center gap-2 px-2 text-xl font-light tracking-tight md:flex">
         <img src="/icone.svg" alt="" class="size-7 rounded-md" />Sillage
