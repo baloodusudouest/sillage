@@ -499,7 +499,14 @@ def _preparer_sillage(personne: str, fiche: dict, forcer: bool = False, recentes
         photos = _lire_photos(personne, recentes=recentes)
         empreinte, contexte = _empreinte(photos), _contexte(personne, photos)
         deja = ETAT["base"].sillage_pret(personne)
-        ajouts = _ajouts(photos)
+        # 0.26.5 : « nouveau » = entré dans le sillage. Première préparation : la date d'ajout à Immich ; ensuite, une
+        # photo qui apparaît (envoyée, ou visage reconnu ou nommé plus tard dans Immich) prend l'heure où Sillage la voit
+        cree, avant = _ajouts(photos), (deja or {}).get("ajouts") or {}
+        if avant:
+            vu = datetime.now().isoformat(timespec="seconds")
+            ajouts = {i: avant.get(i) or vu for i in cree}
+        else:
+            ajouts = cree
         if deja and not forcer and deja["empreinte"] == empreinte and deja["contexte"] == contexte and not deja["erreur"] \
                 and (deja["ajouts"] or not ajouts):
             return {**deja["contenu"], "nouvelles": _recentes(deja["ajouts"])}, False

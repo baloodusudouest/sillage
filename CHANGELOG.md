@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 0.26.5 — 27 novembre 2026 (« nouveau » = entré dans le sillage)
+
+- **Constaté le 27/11/2026 sur la vraie installation** (essai SIL-18) : les 21 photos envoyées dans Immich ce jour-là n'avaient encore **aucun visage nommé** (reconnaissance faciale d'Immich pas encore passée) : elles n'étaient dans le sillage de personne, donc pas dans « Quoi de neuf ». Et le « J'ai vu » touché à 18:06 les aurait cachées une fois reconnues, car elles avaient été envoyées avant.
+- **Correctif** : pour Julien, une photo est nouvelle quand elle **entre dans le sillage** : à la première préparation, sa date d'ajout à Immich ; ensuite, l'heure où Sillage la voit apparaître (envoyée, ou visage reconnu ou nommé plus tard dans Immich). « J'ai vu » ne cache donc plus une photo reconnue après coup. Les invités et la Gazette gardent la date d'ajout à Immich.
+- Test `test_photo_entree_tard_dans_le_sillage`. Jamais essayé sur la vraie installation.
+
 ## 0.26.4 — 27 novembre 2026 (« J'ai vu » dans Quoi de neuf)
 
 - **Bouton « J'ai vu »** en haut du bloc « Quoi de neuf » (demande de Julien, 27/11/2026) : le bloc se ferme et ce qui est déjà arrivé n'est plus montré, sur tous les appareils (`POST /api/nouveautes/vu`, réglage `nouveautes_vues_le` dans la base) ; les marques « Nouvelle » du chemin suivent. Les arrivées suivantes reviennent, sous « Quoi de neuf · depuis ta dernière lecture ».

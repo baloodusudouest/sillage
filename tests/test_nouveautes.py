@@ -2,6 +2,7 @@
 et pour La Récidive de la Gazette (GET /externe/nouveautes). Personnes, photos et jetons inventés."""
 from __future__ import annotations
 
+import time
 from datetime import date, timedelta
 
 import pytest
@@ -65,7 +66,7 @@ def test_quoi_de_neuf_de_julien(monde, monkeypatch):
     j = client.get("/api/nouveautes").json()
     assert j["jours"] == 30 and len(j["personnes"]) == 1
     p = j["personnes"][0]
-    assert p["personne"] == CAMILLE and p["nom"] == "Camille R." and p["ajoutee_le"] == _jour(2)
+    assert p["personne"] == CAMILLE and p["nom"] == "Camille R." and p["ajoutee_le"] == _jour(0)   # 0.26.5 : entrée dans le sillage
     par_debut = {e["debut"][:4]: e for e in p["etapes"]}
     noel = par_debut[_jour(3)[:4]]
     assert noel["nouvelle"] is True and noel["photos"] == 2 and noel["retrouvee"] is False
@@ -158,6 +159,27 @@ def test_j_ai_vu(monde, monkeypatch):
     assert j["personnes"] == [] and j["vu_le"] == r["vu_le"]
     assert client.get(f"/api/chemin/{CAMILLE}").json()["nouvelles"] == []             # plus marquées non plus
     faux_.photos[CAMILLE].append(photo("demain", f"{_jour(1)}T10:00:00", "2026/Après", createdAt=_ajoutee(-1)))
+    time.sleep(1.1)
     client.get(f"/api/chemin/{CAMILLE}/verifier")
     p = client.get("/api/nouveautes").json()["personnes"]
     assert len(p) == 1 and sum(e["photos"] for e in p[0]["etapes"]) == 1
+
+
+def test_photo_entree_tard_dans_le_sillage(monde, monkeypatch):
+    """0.26.5 : une photo envoyée avant « J'ai vu » mais reconnue plus tard dans Immich (visage attribué ensuite)
+    entre dans le sillage après : elle est nouvelle (heure où Sillage la voit), pas cachée par « J'ai vu »."""
+    client, faux_ = monde
+    _entrer(client)
+    monkeypatch.setattr(main, "PAUSE_SILLAGES", 0)
+    _anciennes(faux_)
+    _carnet()
+    client.post("/api/sillages/preparer")
+    _finir()
+    client.post("/api/nouveautes/vu")
+    # envoyée il y a deux jours, reconnue maintenant : elle apparaît dans les photos de Camille
+    faux_.photos[CAMILLE].append(photo("reconnue", "2018-08-08T10:00:00", "2018/Été", createdAt=_ajoutee(2)))
+    time.sleep(1.1)                                                                   # l'heure à la seconde
+    client.get(f"/api/chemin/{CAMILLE}/verifier")
+    p = client.get("/api/nouveautes").json()["personnes"]
+    assert len(p) == 1 and p[0]["etapes"][0]["photos"] == 1 and p[0]["etapes"][0]["retrouvee"] is True
+    assert len(client.get(f"/api/chemin/{CAMILLE}").json()["nouvelles"]) == 1
