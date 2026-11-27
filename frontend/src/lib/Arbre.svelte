@@ -302,20 +302,11 @@
   {/if}
 
   {#if resume}
-    <section class="verre resultat" aria-label="Lien de parenté" aria-live="polite">
-      <button type="button" class="fermer" aria-label="Effacer le lien" onclick={effacerLien}>×</button>
-      <p class="phrase">{resume.phrase}</p>
-      {#if resume.etapes.length}
-        <ol class="etapes">
-          {#each resume.etapes as e, i}<li>{#if i}<span class="fleche" aria-hidden="true">→</span>{/if}{e}</li>{/each}
-        </ol>
-      {/if}
-      {#if vue === 'vie'}
-        <p class="discret petit">Chemin allumé sur tout l'arbre. <button type="button" class="lien-texte" onclick={voirComplet}>Le voir dans l'arbre à plat</button></p>
-      {:else if schema}
-        <p class="discret petit">Schéma du chemin. <button type="button" class="lien-texte" onclick={voirComplet}>Le voir dans l'arbre complet</button>
-          · <button type="button" class="lien-texte" onclick={effacerLien}>Revenir à la vue</button></p>
-      {/if}
+    <!-- 0.26.3 (Julien) : plus de pavé qui cache l'arbre : deux boutons seulement ; le lien se lit sur les cartes -->
+    <section class="verre resultat" aria-label="Lien de parenté">
+      <p class="sr-only" aria-live="polite">{resume.phrase}. {resume.etapes.join(', ')}.</p>
+      {#if vue !== 'complet'}<button type="button" onclick={voirComplet}>Voir à plat</button>{/if}
+      <button type="button" onclick={effacerLien}>Fermer</button>
     </section>
   {/if}
 
@@ -439,12 +430,10 @@
   .aide p { margin: 0 0 0.5rem; }
   .carte { position: absolute; z-index: 62; right: max(0.75rem, env(safe-area-inset-right, 0px)); bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
            width: min(22rem, calc(100vw - 1.5rem)); max-height: calc(100dvh - 9rem); overflow-y: auto; padding: 1rem 1.1rem; }
-  .resultat { position: absolute; z-index: 62; left: max(0.75rem, env(safe-area-inset-left, 0px)); bottom: calc(2.6rem + env(safe-area-inset-bottom, 0px));
-              width: min(30rem, calc(100vw - 1.5rem)); padding: 0.9rem 1.1rem; }
-  .phrase { margin: 0; padding-right: 2.2rem; font-weight: 600; color: var(--app); }
-  .etapes { list-style: none; margin: 0.45rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.2rem 0.35rem; font-size: 0.88rem; }
-  .fleche { color: var(--muted-foreground); margin-right: 0.35rem; }
-  .lien-texte { background: none; border: 0; padding: 0; color: var(--app); font: inherit; text-decoration: underline; cursor: pointer; min-height: 2.75rem; }
+  .resultat { position: absolute; z-index: 62; left: 50%; translate: -50% 0; bottom: calc(2.6rem + env(safe-area-inset-bottom, 0px));
+              display: flex; gap: 0.25rem; padding: 0.25rem; }
+  .resultat button { min-height: 2.75rem; padding: 0 1.1rem; white-space: nowrap; border: 0; border-radius: 999px; background: none; color: inherit; font: inherit; cursor: pointer; }
+  .resultat button:first-of-type { background: var(--app); color: var(--app-contraste); font-weight: 600; }
   .fermer { position: absolute; top: 0.4rem; right: 0.5rem; width: 2.75rem; height: 2.75rem; border: 0; background: none;
             color: var(--muted-foreground); font-size: 1.4rem; cursor: pointer; }
   .lien { margin: 0; padding-right: 2.5rem; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--app); }

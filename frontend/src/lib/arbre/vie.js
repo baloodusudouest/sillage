@@ -213,7 +213,18 @@ export function creerVie(conteneur, fam, { lienDe = () => '', surChoix = () => {
     if (chemin && chemin.ids.size) {
       let x = 0, z = 0
       for (const id of chemin.ids) { const p = disposition.pos.get(id); if (p) { x += p.x; z += p.z } }
-      if (x || z) tourner = { de: monde.rotation.y, vers: proche(monde.rotation.y, Math.atan2(z, x) - Math.PI / 2), t0: performance.now() }
+      if (x || z) {
+        const r = proche(monde.rotation.y, Math.atan2(z, x) - Math.PI / 2)
+        tourner = { de: monde.rotation.y, vers: r, t0: performance.now() }
+        // la caméra se place pour voir tout le chemin (une fois tourné), sur iPhone comme sur PC
+        const pts = [...chemin.ids].map((id) => disposition.pos.get(id)).filter(Boolean)
+          .map((p) => new THREE.Vector3(p.x * Math.cos(r) + p.z * Math.sin(r), p.y, -p.x * Math.sin(r) + p.z * Math.cos(r)))
+        const bo = new THREE.Box3().setFromPoints(pts), mil = bo.getCenter(new THREE.Vector3()), t = bo.getSize(new THREE.Vector3())
+        const vf = THREE.MathUtils.degToRad(camera.fov) / 2, hf = Math.atan(Math.tan(vf) * camera.aspect)
+        const d = Math.max((t.x / 2 + 4) / Math.tan(hf), (t.y / 2 + 3) / Math.tan(vf), 14)
+        cible = { pos: new THREE.Vector3(mil.x, mil.y + 3, bo.max.z + d), regard: mil.clone(), t0: performance.now(),
+                  de: camera.position.clone(), deR: controls.target.clone() }
+      }
     }
     return new Set(disposition.pos.keys())
   }

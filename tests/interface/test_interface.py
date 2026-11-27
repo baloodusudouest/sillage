@@ -413,8 +413,10 @@ def test_022_arbre_du_proprietaire(page):
     page.get_by_role("button", name="Lien avec…").click()
     page.locator(".panneau").get_by_role("button", name=re.compile("^Léa MARCHAND")).click()
     resultat = page.locator(".resultat")
-    resultat.get_by_text("fille de Hugo", exact=False).wait_for()
-    assert "sa fille Léa" in resultat.inner_text()
+    resultat.get_by_role("button", name="Fermer").wait_for()                          # 0.26.3 : deux boutons seulement
+    assert resultat.get_by_role("button", name="Voir à plat").count() == 0           # déjà à plat
+    lu = resultat.locator(".sr-only").text_content()                                  # le lien reste dit au lecteur d'écran
+    assert "fille de Hugo" in lu and "sa fille Léa" in lu
     assert page.locator("svg.plan .personne[opacity='1']").count() == 2              # seul le chemin reste allumé
     page.keyboard.press("Escape")                                                     # efface le lien
     assert page.locator(".resultat").count() == 0
@@ -422,10 +424,10 @@ def test_022_arbre_du_proprietaire(page):
     page.get_by_role("button", name="Éventail", exact=True).click()
     page.get_by_role("button", name="Lien avec…").click()
     page.locator(".panneau").get_by_role("button", name=re.compile("^Léa MARCHAND")).click()
-    resultat.get_by_text("Schéma du chemin", exact=False).wait_for()
+    resultat.get_by_role("button", name="Voir à plat").wait_for()
     assert page.locator("svg.plan .personne").count() == 2                            # Hugo et Léa, rien d'autre
     assert "Fille" in page.locator("svg.plan").text_content()
-    resultat.get_by_role("button", name="Revenir à la vue").click()
+    resultat.get_by_role("button", name="Fermer").click()
     assert page.locator(".resultat").count() == 0
     assert page.locator("svg.plan .personne").count() > 2                             # l'éventail revient
     # 0.26.2 : en Vie 3D, le chemin s'allume sur le cylindre de « Tout l'arbre » (pas de schéma)
@@ -433,7 +435,8 @@ def test_022_arbre_du_proprietaire(page):
     page.locator(".arbre canvas").wait_for()
     page.get_by_role("button", name="Lien avec…").click()
     page.locator(".panneau").get_by_role("button", name=re.compile("^Léa MARCHAND")).click()
-    resultat.get_by_text("Chemin allumé sur tout l'arbre", exact=False).wait_for()
+    resultat.get_by_role("button", name="Voir à plat").wait_for()
+    assert resultat.bounding_box()["height"] < 70                                    # pas de pavé sur l'arbre
     assert page.get_by_role("button", name="Proches").count() == 0
     assert page.locator(".arbre canvas").count() == 1
     page.keyboard.press("Escape")                                                     # efface le lien
@@ -468,7 +471,8 @@ def test_022_arbre_de_l_invite_et_proposition(page):
     choix = page.locator(".panneau button > span:first-child").all_inner_texts()
     assert "Personne non montrée" not in choix
     page.locator(".panneau").get_by_role("button", name=re.compile("^Hugo")).click()
-    page.locator(".resultat").get_by_text("de Léa", exact=False).wait_for()
+    page.locator(".resultat").get_by_role("button", name="Fermer").wait_for()
+    assert "de Léa" in page.locator(".resultat .sr-only").text_content()
     sans_debordement(page)
 
 

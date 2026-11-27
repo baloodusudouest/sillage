@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 0.26.3 — 27 novembre 2026 (plus de pavé sur l'arbre pendant « Lien avec… »)
+
+- **Le pavé du lien est retiré** (demande de Julien, 27/11/2026) : il cachait une grande partie de la vue. Il reste deux boutons en bas, **Voir à plat** (pas dans l'arbre à plat) et **Fermer** ; le lien se lit sur les cartes de l'arbre (« Fille de cousin »…) et reste dit au lecteur d'écran.
+- **Vie 3D** : la caméra se place pour voir tout le chemin une fois le cylindre tourné (iPhone et PC).
+- Tests d'écran revus. Jamais essayé sur la vraie installation.
+
 ## 0.26.2 — 27 novembre 2026 (« Lien avec… » dessiné sur le cylindre en Vie 3D)
 
 - **Vie 3D : le chemin se dessine sur le cylindre** (demande de Julien, 27/11/2026) au lieu du schéma à plat : « Lien avec… » passe la vue en « Tout l'arbre », allume le chemin (branches et personnes, le reste en retrait), tourne le cylindre pour mettre le chemin face à l'écran et arrête la rotation lente tant que le chemin est allumé. Lien « Le voir dans l'arbre à plat ». Le schéma reste pour l'éventail. Test d'écran complété. Jamais essayé sur la vraie installation.
