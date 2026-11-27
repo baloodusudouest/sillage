@@ -253,7 +253,8 @@ def test_plafond_par_invitation(monde, carnet, monkeypatch):
 def test_invitation_expiree_plus_d_arbre(monde, carnet):
     client, _ = monde
     jeton = _inviter(client)
-    main.ETAT["base"]._c.execute("UPDATE invites SET expire = '2000-01-01T12:00:00'")
-    main.ETAT["base"]._c.commit()
+    _attendre_le_fond()
+    with main.ETAT["base"]._c:
+        main.ETAT["base"]._c.execute("UPDATE invites SET expire = '2000-01-01T12:00:00'")
     assert client.get(f"/api/invite/{jeton}/arbre").status_code == 404
     assert client.post(f"/api/invite/{jeton}/arbre/proposition", json={}).status_code == 404

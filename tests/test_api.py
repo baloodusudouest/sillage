@@ -384,8 +384,9 @@ def test_invitation_expiree(monde):
     client, _ = monde
     h = avec_jeton_ha()
     chemin = sejour(client, h, noms=["Camille ROUSSEL"])["chemin"]
-    main.ETAT["base"]._c.execute("UPDATE invites SET expire = '2000-01-01T00:00:00'")
-    main.ETAT["base"]._c.commit()
+    _attendre_le_fond()          # 0.22 : la préparation en fond partage la connexion ; elle validait parfois l'UPDATE avant nous
+    with main.ETAT["base"]._c:
+        main.ETAT["base"]._c.execute("UPDATE invites SET expire = '2000-01-01T00:00:00'")
     main.ETAT["invites"].clear()
     assert client.get("/api" + chemin).status_code == 404
 
