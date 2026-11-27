@@ -57,19 +57,22 @@
   let cherche = $state('')
   let cible = $state(null)                  // « Lien avec… » : la deuxième personne
 
-  const plat = $derived(VUES.find((v) => v.cle === vue)?.plat)
+  // 0.23.1 : un chemin que la vue ne peut pas montrer en entier (éventail, sablier, arbre de vie) s'affiche en schéma
+  // de parenté, de la personne au centre jusqu'à la personne cherchée
+  const schema = $derived(!!cible && !['complet', 'helice'].includes(vue))
+  const plat = $derived(VUES.find((v) => v.cle === vue)?.plat || schema)
   const titre = $derived(invite ? 'Votre arbre de famille' : `L'arbre de ${nomDe(parId.get(arbre.depart))}`)
   const lien = $derived(choisie ? parente(ix, reference, choisie.id) : '')
   const prenomDe = (id) => prenomNom(parId.get(id))[0]
   const ch = $derived(cible ? cheminEntre(fam, centre, cible) : null)
-  const sur = $derived(surlignage(ch))
+  const sur = $derived(surlignage(ch, fam))
   const resume = $derived.by(() => {
     if (!cible) return null
     if (!ch) return { phrase: `${prenomDe(cible)} et ${prenomDe(centre)} ne sont pas reliés dans l'arbre.`, etapes: [] }
     const mot = parente(ix, centre, cible)
     return {
       phrase: mot === 'Par alliance' ? `${nomDe(parId.get(cible))} est de la famille de ${prenomDe(centre)} par alliance`
-        : `${nomDe(parId.get(cible))} : ${mot.toLowerCase()} de ${prenomDe(centre)}${ch.alliance && !/^(Belle|Beau|Gendre|Ex-|Conjoint)/.test(mot) ? ' (par alliance)' : ''}`,
+        : `${nomDe(parId.get(cible))} : ${phraseLien(mot, prenomDe(centre))}${ch.alliance && !/^(Belle|Beau|Gendre|Ex-|Conjoint)/.test(mot) && !/par alliance$/.test(mot) ? ' (par alliance)' : ''}`,
       etapes: ch.etapes.map((e, i) => (i ? motEtape(fam, e, ch.etapes[i - 1].id) : prenomDe(e.id))),
       incomplet: ![...sur.ids].every((id) => dessines.has(id)),
     }
@@ -92,7 +95,7 @@
     pret = false
     await tick()
     if (plat) {
-      moteur = { sorte: 'plat', m: creerVues2D(svgEl, fam, { surChoix: choisir }) }
+      moteur = { sorte: 'plat', m: creerVues2D(svgEl, fam, { surChoix: schema ? () => {} : choisir }) }
       dessiner()
       pret = true
       return
@@ -114,7 +117,9 @@
   }
   function dessiner(garderCadre = false) {
     if (!moteur) return
-    if (moteur.sorte === 'plat') dessines = moteur.m.dessiner(vue, centre, sur, garderCadre)
+    if (moteur.sorte === 'plat') dessines = schema && ch
+      ? moteur.m.dessiner('chemin', centre, sur, false, { ch, lienDe: (id) => parente(ix, centre, id) })
+      : moteur.m.dessiner(schema ? 'complet' : vue, centre, sur, garderCadre)
     else if (moteur.sorte === 'vie') dessines = moteur.m.montrer(centre, sur)
     else { moteur.m.surligner(sur); dessines = new Set(arbre.personnes.map((p) => p.id)) }
   }
@@ -153,14 +158,31 @@
     choisir(p.id)
   }
   async function lienAvec(p) {
+    const avant = schema
     cible = p.id
     panneau = null
     choisie = null
     await tick()
-    dessiner(true)
+    if (schema !== avant || (schema && moteur?.sorte !== 'plat')) monter()
+    else dessiner(vue === 'helice')
   }
-  async function effacerLien() { cible = null; await tick(); dessiner(true) }
+  async function effacerLien() {
+    const avant = schema
+    cible = null
+    await tick()
+    if (avant) monter()
+    else dessiner(true)
+  }
+  // « Cousin de sa mère » + Camille → « cousin de la mère de Camille » (0.23.1)
+  function phraseLien(mot, prenom) {
+    if (mot.endsWith(' par alliance')) return phraseLien(mot.slice(0, -13), prenom) + ' par alliance'
+    const m = mot.toLowerCase()
+    for (const [fin, dit] of [[' de sa mère', ' de la mère de '], [' de son père', ' du père de '], [" d'un parent", " d'un parent de "]])
+      if (m.endsWith(fin)) return m.slice(0, -fin.length) + dit + prenom
+    return m + ' de ' + prenom
+  }
   function voirComplet() { vue = 'complet'; ecrireStock(CLE_VUE, 'complet'); monter() }
+  // Changer de vue pendant un chemin : le schéma reste pour éventail, sablier et arbre de vie
 
   const trouves = $derived.by(() => {
     const t = cherche.trim().toLowerCase()
@@ -279,9 +301,9 @@
           {#each resume.etapes as e, i}<li>{#if i}<span class="fleche" aria-hidden="true">→</span>{/if}{e}</li>{/each}
         </ol>
       {/if}
-      {#if resume.incomplet && vue !== 'complet'}
-        <p class="discret petit">Une partie du chemin n'est pas dans cette vue.
-          <button type="button" class="lien-texte" onclick={voirComplet}>Voir dans l'arbre complet</button></p>
+      {#if schema}
+        <p class="discret petit">Schéma du chemin. <button type="button" class="lien-texte" onclick={voirComplet}>Le voir dans l'arbre complet</button>
+          · <button type="button" class="lien-texte" onclick={effacerLien}>Revenir à la vue</button></p>
       {/if}
     </section>
   {/if}

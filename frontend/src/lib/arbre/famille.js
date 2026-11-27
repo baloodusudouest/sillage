@@ -72,13 +72,18 @@ export function chemin(fam, a, b) {
     const etapes = []
     for (let x = b; x !== a; x = avant.get(x)[0]) etapes.unshift({ id: x, rel: avant.get(x)[1] })
     etapes.unshift({ id: a, rel: null })
-    // « sa mère, puis son fils » vers un enfant de ce parent = « son frère » (même parent)
+    // « sa mère, puis son fils » vers un enfant de ce parent = « son frère » (même parent) ;
+    // 0.23.1 : « sa fille, puis son père » quand ce père est son conjoint = « son conjoint » (on ne passe pas par l'enfant)
+    let parAlliance = alliance
     for (let i = 1; i + 1 < etapes.length; i++) {
-      if (etapes[i].rel === 'parent' && etapes[i + 1].rel === 'enfant' && fam.fratrie(etapes[i - 1].id).includes(etapes[i + 1].id)) {
-        etapes.splice(i, 2, { id: etapes[i + 1].id, rel: 'frere' })
+      const avantId = etapes[i - 1].id, apres = etapes[i + 1]
+      if (etapes[i].rel === 'parent' && apres.rel === 'enfant' && fam.fratrie(avantId).includes(apres.id)) {
+        etapes.splice(i, 2, { id: apres.id, rel: 'frere' }); i--
+      } else if (etapes[i].rel === 'enfant' && apres.rel === 'parent' && fam.conjoints(avantId).includes(apres.id)) {
+        etapes.splice(i, 2, { id: apres.id, rel: 'conjoint' }); parAlliance = true; i--
       }
     }
-    return { etapes, alliance }
+    return { etapes, alliance: parAlliance }
   }
   return null
 }
@@ -95,9 +100,15 @@ export function motEtape(fam, e, precedente) {
 }
 
 // Les personnes et les liens d'un chemin, pour le surligner
-export function surlignage(ch) {
+export function surlignage(ch, fam = null) {
   if (!ch) return null
   const ids = new Set(ch.etapes.map((e) => e.id)), aretes = new Set()
-  for (let i = 1; i < ch.etapes.length; i++) { const a = ch.etapes[i - 1].id, b = ch.etapes[i].id; aretes.add(a + '|' + b); aretes.add(b + '|' + a) }
+  const relier = (a, b) => { aretes.add(a + '|' + b); aretes.add(b + '|' + a) }
+  for (let i = 1; i < ch.etapes.length; i++) {
+    const a = ch.etapes[i - 1].id, b = ch.etapes[i].id
+    relier(a, b)
+    // 0.23.1 : un frère ou une sœur se rejoint par les parents communs : leurs traits s'allument aussi
+    if (fam && ch.etapes[i].rel === 'frere') for (const p of fam.parents(a)) if (fam.parents(b).includes(p)) { relier(p, a); relier(p, b) }
+  }
   return { ids, aretes }
 }

@@ -404,6 +404,16 @@ def test_022_arbre_du_proprietaire(page):
     assert page.locator("svg.plan .personne[opacity='1']").count() == 2              # seul le chemin reste allumé
     page.keyboard.press("Escape")                                                     # efface le lien
     assert page.locator(".resultat").count() == 0
+    # 0.23.1 : en éventail, le lien s'affiche en schéma, de la personne au centre jusqu'à la personne cherchée
+    page.get_by_role("button", name="Éventail", exact=True).click()
+    page.get_by_role("button", name="Lien avec…").click()
+    page.locator(".panneau").get_by_role("button", name=re.compile("^Léa MARCHAND")).click()
+    resultat.get_by_text("Schéma du chemin", exact=False).wait_for()
+    assert page.locator("svg.plan .personne").count() == 2                            # Hugo et Léa, rien d'autre
+    assert "Fille" in page.locator("svg.plan").text_content()
+    resultat.get_by_role("button", name="Revenir à la vue").click()
+    assert page.locator(".resultat").count() == 0
+    assert page.locator("svg.plan .personne").count() > 2                             # l'éventail revient
     page.keyboard.press("Escape")                                                     # ferme l'arbre
     assert page.get_by_role("dialog").count() == 0
     sans_debordement(page)

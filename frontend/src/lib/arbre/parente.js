@@ -45,7 +45,7 @@ export function parente(ix, a, b, profond = 0) {
     return arriere(d - 2) + accord(g, d > 2 ? 'petite-fille' : 'Petite-fille', d > 2 ? 'petit-fils' : 'Petit-fils', d > 2 ? 'petit-enfant' : 'Petit-enfant')
   }
   let mieux = null
-  for (const [x, da] of A) if (B.has(x)) { const s = da + B.get(x); if (!mieux || s < mieux.s) mieux = { da, db: B.get(x), s } }
+  for (const [x, da] of A) if (B.has(x)) { const s = da + B.get(x); if (!mieux || s < mieux.s) mieux = { da, db: B.get(x), s, x } }
   if (mieux) {
     const { da, db } = mieux
     if (da === 1 && db === 1) return accord(g, 'Sœur', 'Frère', 'Frère ou sœur')
@@ -53,6 +53,14 @@ export function parente(ix, a, b, profond = 0) {
     if (da === 1 && db === 2) return accord(g, 'Nièce', 'Neveu', 'Neveu ou nièce')
     if (da === 2 && db === 2) return accord(g, 'Cousine', 'Cousin', 'Cousin·e')
     if (da === 3 && db === 1) return accord(g, 'Grand-tante', 'Grand-oncle', 'Grand-oncle ou grand-tante')
+    if (da === 1 && db === 3) return accord(g, 'Petite-nièce', 'Petit-neveu', 'Petit-neveu ou petite-nièce')
+    if (da === 4 && db === 1) return accord(g, 'Arrière-grand-tante', 'Arrière-grand-oncle', 'Arrière-grand-oncle ou grand-tante')
+    if (da === 2 && db === 3) return accord(g, 'Fille de cousin', 'Fils de cousin', 'Enfant de cousin')
+    if (da === 3 && db === 2) {                         // 0.23.1 : le cousin d'un parent, en disant lequel
+      const x = mieux.x, par = [...(ix.parents.get(a) || [])].find((p) => ancetres(ix, p).get(x) === 2)
+      const de = par ? accord(ix.genre.get(par), ' de sa mère', ' de son père', " d'un parent") : " d'un parent"
+      return accord(g, 'Cousine', 'Cousin', 'Cousin·e') + de
+    }
     if (da === 3 && db === 3) return accord(g, 'Cousine issue de germain', 'Cousin issu de germain', 'Cousin·e issu·e de germain')
     return 'Famille éloignée'
   }
@@ -62,6 +70,12 @@ export function parente(ix, a, b, profond = 0) {
     const via = parente(ix, c, b, 1)
     if (via === 'Mère' || via === 'Père' || via === 'Parent') return accord(g, 'Belle-mère', 'Beau-père', 'Beau-parent')
     if (via === 'Sœur' || via === 'Frère' || via === 'Frère ou sœur') return accord(g, 'Belle-sœur', 'Beau-frère', 'Beau-frère ou belle-sœur')
+  }
+  // 0.23.1 : la famille de sang du conjoint (sa tante, son cousin…) = « Tante par alliance », « Cousin par alliance »
+  for (const c of ix.conjoints.get(a) || []) {
+    if (ix.ex.has(a + '|' + c)) continue
+    const via = parente(ix, c, b, 1)
+    if (via && via !== 'Par alliance' && via !== 'Famille éloignée' && !via.includes(' de ') && !/^(Fille|Fils|Enfant|Petit|Arrière-petit|Ex-|Conjoint)/.test(via)) return via + ' par alliance'
   }
   for (const c of ix.conjoints.get(b) || []) {
     const via = parente(ix, a, c, 1)

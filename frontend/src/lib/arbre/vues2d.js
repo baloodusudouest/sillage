@@ -186,8 +186,40 @@ export function creerVues2D(svg, fam, { surChoix = () => {} } = {}) {
     }
     for (const x of ids) carte(X.get(x), Y(x), x, { w: W - 16, centre: x === c })
     const xs = ids.map((x) => X.get(x)), ys = ids.map(Y)
+    const sur = surligne ? ids.filter((x) => surligne.ids.has(x)) : []
+    const boite = sur.length > 1 ? (() => { const a = sur.map((x) => X.get(x)), b = sur.map(Y)
+      return { x: Math.min(...a) - W, y: Math.min(...b) - H * 0.8, w: Math.max(...a) - Math.min(...a) + 2 * W, h: Math.max(...b) - Math.min(...b) + 1.6 * H } })() : null
     return { x: Math.min(...xs) - W, y: Math.min(...ys) - H, w: Math.max(...xs) - Math.min(...xs) + 2 * W, h: Math.max(...ys) - Math.min(...ys) + 2 * H,
-             foyer: [X.get(c), Y(c)] }
+             foyer: [X.get(c), Y(c)], boite }
+  }
+
+  // ---------------------------------------------------------------- chemin entre deux personnes (0.23.1)
+  // Schéma de parenté : on remonte de la personne au centre jusqu'à l'ancêtre commun (colonne de gauche), puis on
+  // redescend jusqu'à la personne cherchée (colonne de droite) ; un frère, une sœur ou un conjoint décale d'une colonne.
+  function cheminVue(c, ch, lienDe) {
+    const W = 170, H = 96, pos = []
+    let x = 0, y = 0, monte = false
+    ch.etapes.forEach((e, i) => {
+      if (i) {
+        if (e.rel === 'parent') { if (!monte && pos.length > 1 && ch.etapes[i - 1].rel !== 'parent' && ch.etapes[i - 1].rel !== null) x += 1; y -= 1; monte = true }
+        else if (e.rel === 'enfant') { if (monte) { x += 1; monte = false } y += 1 }
+        else { x += 1; monte = false }
+      }
+      pos.push([x * W, y * H])
+    })
+    for (let i = 1; i < pos.length; i++) {
+      const [x0, y0] = pos[i - 1], [x1, y1] = pos[i], rel = ch.etapes[i].rel
+      if (rel === 'conjoint') ligne(`M${x0 + (W - 22) / 2},${y0} H${x1 - (W - 22) / 2}`, { lum: true, tirets: fam.ex(ch.etapes[i - 1].id, ch.etapes[i].id) })
+      else if (rel === 'frere') ligne(`M${x0},${y0 - 27} V${y0 - H / 2} H${x1} V${y1 - 27}`, { lum: true })
+      else { const [hx, hy, bx, by] = y1 < y0 ? [x1, y1, x0, y0] : [x0, y0, x1, y1]; ligne(`M${hx},${hy + 27} V${(hy + by) / 2} H${bx} V${by - 27}`, { lum: true }) }
+    }
+    ch.etapes.forEach((e, i) => {
+      carte(pos[i][0], pos[i][1], e.id, { w: W - 22, centre: i === 0 })
+      const mot = i ? lienDe(e.id) : ''
+      if (mot) txt(pos[i][0], pos[i][1] + 40, mot, { 'font-size': 11, fill: '#b9a3e6', 'font-weight': 600, stroke: '#0b0a10', 'stroke-width': 5, 'paint-order': 'stroke' })
+    })
+    const xs = pos.map((p) => p[0]), ys = pos.map((p) => p[1])
+    return { x: Math.min(...xs) - W / 2 - 20, y: Math.min(...ys) - 60, w: Math.max(...xs) - Math.min(...xs) + W + 40, h: Math.max(...ys) - Math.min(...ys) + 140 }
   }
 
   // ---------------------------------------------------------------- cadrage, déplacement, toucher
@@ -195,6 +227,13 @@ export function creerVues2D(svg, fam, { surChoix = () => {} } = {}) {
   function cadrer(c, vue) {
     const r = svg.getBoundingClientRect(), W = r.width || 1, H = r.height || 1, rapport = W / H
     let { x, y, w, h } = c
+    if (c.boite) {                                      // 0.23.1 : tout le chemin à l'écran, entre la barre du haut et l'encart du résultat
+      const b = c.boite, haut = 150, bas = W < 700 ? H * 0.4 : 190, He = Math.max(120, H - haut - bas)
+      const s = Math.min((W * 0.92) / b.w, He / b.h, 1.25)                // pixels par unité, sans grossir à outrance
+      vb = { x: b.x + b.w / 2 - W / s / 2, y: b.y + b.h / 2 - (haut + He / 2) / s, w: W / s, h: H / s }
+      appliquer()
+      return
+    }
     if (vue === 'complet') { w = Math.max(700, Math.min(w, 900)); h = w / rapport; x = c.foyer[0] - w / 2; y = c.foyer[1] - h / 2 }
     else if (c.telephone && W < 700) { w = c.telephone.w; h = w / rapport; x = -w / 2 + 40; y = c.telephone.y - h / 2 + 60 }
     else if (w / h > rapport) { const nh = w / rapport; y -= (nh - h) / 2; h = nh } else { const nw = h * rapport; x -= (nw - w) / 2; w = nw }
@@ -203,11 +242,12 @@ export function creerVues2D(svg, fam, { surChoix = () => {} } = {}) {
     appliquer()
   }
   const VUES = { eventail, sablier, complet }
-  function dessiner(vue, centre, chemin = null, garderCadre = false) {
+  function dessiner(vue, centre, chemin = null, garderCadre = false, extra = {}) {
     surligne = chemin
     dessines = new Set()
     monde.replaceChildren(); defs.replaceChildren()
-    const c = VUES[vue](centre)
+    const c = vue === 'chemin' ? cheminVue(centre, extra.ch, extra.lienDe) : VUES[vue](centre)
+    if (vue === 'chemin') c.boite = { x: c.x, y: c.y, w: c.w, h: c.h }
     if (!garderCadre) cadrer(c, vue)
     return dessines
   }

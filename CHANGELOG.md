@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 0.23.1 — 27 novembre 2026 (« Lien avec… » : tout le chemin)
+
+- **Le chemin entier, de la personne au centre jusqu'à la personne cherchée** (remarque de Julien, 27/11/2026 : on ne voyait que la montée jusqu'à l'ancêtre commun). En **éventail, sablier et arbre de vie**, « Lien avec… » ouvre un **schéma de parenté** : on remonte de la personne au centre jusqu'à l'ancêtre commun (colonne de gauche), puis on redescend jusqu'à la personne cherchée (colonne de droite) ; frère, sœur ou conjoint décalent d'une colonne ; sous chaque carte, son lien avec la personne au centre. Liens « Le voir dans l'arbre complet » et « Revenir à la vue ». Dans l'**arbre complet**, la vue se cadre sur tout le chemin ; les frères et sœurs du chemin s'allument jusqu'à leurs parents communs.
+- **Chemin plus naturel** : « sa fille, puis son père » quand ce père est le conjoint devient « son conjoint » (on ne passe plus par un enfant pour rejoindre la belle-famille).
+- **Liens mieux nommés** : petit-neveu, petite-nièce, arrière-grand-oncle, enfant de cousin, « cousin de la mère de Camille », et la famille de sang du conjoint « tante de Camille par alliance », « cousin … par alliance » (au lieu de « famille éloignée » ou « de la famille par alliance »).
+- Interface seulement (`lib/arbre/vues2d.js` : vue `chemin`, cadrage sur le chemin ; `lib/arbre/famille.js` ; `lib/arbre/parente.js` ; `lib/Arbre.svelte`). Test d'écran du propriétaire complété (schéma en éventail). Jamais essayé sur la vraie installation.
+
 ## 0.23.0 — 27 novembre 2026 (nouvelles vues de l'arbre, « Lien avec… »)
 
 - **Constellation retirée** (illisible selon Julien). **Cinq vues**, choisies par Julien sur deux prototypes : à plat **Éventail** (ancêtres en demi-cercles, famille proche dessous), **Sablier** (ancêtres au-dessus, enfants dessous, frères et sœurs à gauche, conjoint à droite), **Arbre** (tout l'arbre, une génération par rangée, couples reliés) ; en 3D **Vie 3D** (arbre de vie : un étage par génération nommé « ↑ Parents », « ↓ Enfants »…, rotation autour de l'axe vertical seulement, sève lumineuse qui descend des parents vers les enfants, lien écrit sur chaque carte) et **Hélice** (gardée pour l'instant). Éventail par défaut ; dernière vue gardée sur l'appareil. Les vues à plat marchent sans WebGL.
