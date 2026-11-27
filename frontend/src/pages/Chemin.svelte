@@ -9,6 +9,8 @@
   import { Button } from '$lib/components/ui/button/index.js'
   import { ageDit, dateLongue, periode, quandDit, foisDit } from '$lib/dates.js'
   import Etape from '$lib/Etape.svelte'
+  import GitFork from '@lucide/svelte/icons/git-fork'
+  import Arbre from '$lib/Arbre.svelte'
 
   let { id, ondeconnecte } = $props()
   let chemin = $state(null)
@@ -18,6 +20,12 @@
   let ouverte = $state(null)          // clé de l'étape ouverte
   let masquees = $state(false)        // montrer aussi les étapes masquées
   let deCote = $state(false)          // montrer les photos mises de côté
+  // 0.22 : l'arbre de famille (carnet → Treemich) ; pas de bouton si la personne n'a aucun lien, ou si carnet est muet
+  let arbre = $state(null)
+  let arbreOuvert = $state(false)
+  async function lireArbre() {
+    try { arbre = (await api.get(`/api/arbre/${id}`)).arbre } catch { arbre = null }
+  }
 
   const visibles = (c) => c.etapes.filter((e) => masquees || !e.masquee)
   const forts = $derived(chemin ? chemin.chapitres.reduce((n, c) => n + visibles(c).filter((e) => e.temps_fort).length, 0) : 0)
@@ -81,7 +89,7 @@
     catch (err) { if (err.statut === 401) ondeconnecte?.(); else erreur = err.message }
     lecture = false
   }
-  onMount(() => lire())
+  onMount(() => { lire(); lireArbre() })
 </script>
 
 <svelte:window onscroll={mesurer} onresize={mesurer} />
@@ -116,6 +124,11 @@
           <button type="button" aria-pressed={!tout} onclick={() => (tout = false)} class="h-8 rounded-full px-3 text-sm aria-pressed:bg-primary aria-pressed:text-primary-foreground">Temps forts</button>
           <button type="button" aria-pressed={tout} onclick={() => (tout = true)} class="h-8 rounded-full px-3 text-sm aria-pressed:bg-primary aria-pressed:text-primary-foreground">Tout</button>
         </div>
+      {/if}
+      {#if arbre}
+        <Button variant="outline" onclick={() => (arbreOuvert = true)} aria-label="Voir son arbre de famille">
+          <GitFork class="size-4 rotate-180" aria-hidden="true" />Arbre
+        </Button>
       {/if}
       <Button variant="outline" size="icon" aria-label="Relire dans Immich" disabled={lecture} onclick={() => lire(true)}>
         <RefreshCw class={'size-4 ' + (lecture ? 'animate-spin' : '')} aria-hidden="true" />
@@ -186,6 +199,10 @@
 
 {#if etapeOuverte}
   <Etape etape={etapeOuverte} immich={chemin.immich} portImmich={chemin.immich_port} oncorrige={corriger} onferme={() => (ouverte = null)} />
+{/if}
+
+{#if arbreOuvert && arbre}
+  <Arbre {arbre} onfermer={() => (arbreOuvert = false)} />
 {/if}
 
 <style>

@@ -72,23 +72,84 @@ def faux_anneau(adresse: str, jeton: str) -> dict:
                          "tag_non_datee": "Lots/Non datée", "hotes": []}}
 
 
+def arbre_demo() -> dict:
+    """0.22 : un arbre inventé d'une soixantaine de personnes autour de Camille et Hugo (faux carnet)."""
+    import random
+    r = random.Random(7)
+    prenoms_f = ["Rose", "Jeanne", "Louise", "Alice", "Marthe", "Odile", "Clara", "Inès", "Zoé", "Lucie", "Agathe", "Margot"]
+    prenoms_h = ["Jules", "Henri", "Léon", "Paul", "Émile", "Victor", "Simon", "Théo", "Basile", "Octave", "Félix", "Noël"]
+    gens, liens = [], []
+
+    def personne(nom, genre, an, mort=None, immich=None, masque=False):
+        i = f"t-{len(gens)}"
+        gens.append({"id": i, "nom": nom, "genre": genre, "immich": immich, "naissance": str(an) if an else "",
+                     "deces": mort or "", "decede": bool(mort), "fiche": bool(immich), "carnet_uid": "demo-" + i if immich else None,
+                     "personne_id": None, "masque_invites": masque})
+        return i
+    cam = personne("Camille ROUSSEL", "femme", "1987-03-14", immich=CAMILLE)
+    hugo = personne("Hugo MARCHAND", "homme", 1985, immich=HUGO)
+    liens.append({"de": cam, "vers": hugo, "type": "conjoint", "divorce": False})
+    ex = personne("Anne BLANC", "femme", 1984)
+    liens.append({"de": ex, "vers": hugo, "type": "conjoint", "divorce": True})
+
+    def ascendance(enfant, nom, an, prof):
+        if prof == 0:
+            return
+        pere = personne(f"{r.choice(prenoms_h)} {nom}", "homme", an - 28, f"{an + 40}-01-01" if an < 1960 else None)
+        mere = personne(f"{r.choice(prenoms_f)} {nom}", "femme", an - 26, f"{an + 50}-06-01" if an < 1950 else None,
+                        masque=(prof == 2 and nom == "MARCHAND"))
+        liens.extend([{"de": pere, "vers": mere, "type": "conjoint", "divorce": False},
+                      {"de": pere, "vers": enfant, "type": "parent"}, {"de": mere, "vers": enfant, "type": "parent"}])
+        for _ in range(r.randint(1, 2)):
+            frere = personne(f"{r.choice(prenoms_h + prenoms_f)} {nom}", r.choice(["femme", "homme"]), an + r.randint(-4, 4))
+            liens.extend([{"de": pere, "vers": frere, "type": "parent"}, {"de": mere, "vers": frere, "type": "parent"}])
+            if r.random() < 0.6:
+                cousin = personne(f"{r.choice(prenoms_h + prenoms_f)} {nom}", r.choice(["femme", "homme"]), an + 28)
+                liens.append({"de": frere, "vers": cousin, "type": "parent"})
+        ascendance(pere, nom, an - 28, prof - 1)
+        ascendance(mere, r.choice(["DURAND", "FABRE", "VIDAL", "MARTY"]), an - 26, prof - 1)
+    ascendance(cam, "ROUSSEL", 1987, 3)
+    ascendance(hugo, "MARCHAND", 1985, 2)
+    for k in range(2):
+        e = personne(f"{['Léa', 'Tom'][k]} MARCHAND", ["femme", "homme"][k], 2016 + k * 3)
+        liens.extend([{"de": cam, "vers": e, "type": "parent"}, {"de": hugo, "vers": e, "type": "parent"}])
+    return {"contrat": 1, "ok": True, "genere_le": "2026-11-27T00:00:00+01:00", "personnes": gens, "liens": liens}
+
+
+def faux_carnet():
+    """0.22 : carnet de démonstration : aucune fiche, l'arbre inventé, les propositions acceptées."""
+    arbre = arbre_demo()
+
+    def repondre(d: httpx.Request) -> httpx.Response:
+        if d.url.path == "/sillage/arbre":
+            return httpx.Response(200, json=arbre)
+        if d.url.path == "/sillage/propositions":
+            return httpx.Response(200, json={"ok": True, "deja": False})
+        if d.url.path == "/sillage/personnes":
+            return httpx.Response(200, json={"personnes": []})
+        return httpx.Response(404, json={})
+    return httpx.MockTransport(repondre)
+
+
 def main_() -> None:
     racine, port = Path(sys.argv[1]), int(sys.argv[2])
     (racine / "data").mkdir(parents=True, exist_ok=True)
     cfg = Config(password=MDP, immich_url="http://immich", immich_cle="cle", data=racine / "data",
                  static=Path(__file__).resolve().parents[2] / "app" / "static",
-                 attente_connexion=False, jeton_ha="jeton-ha")
+                 attente_connexion=False, jeton_ha="jeton-ha", carnet_url="http://carnet", jeton="jeton-demo")
     # 0.16 : le tag des non datées est un réglage de l'écran Réglages (fichier reglages.json du dossier de données)
     import json
     reglages = racine / "data" / "reglages.json"
     if not reglages.exists():
         reglages.write_text(json.dumps({"tag_non_datee": "Lots/Non datée"}))
     main.ETAT.update(cfg=cfg, immich=Immich("http://immich", "cle", transport=vie().transport()),
-                     lire_sauvegarde=faux_anneau)
+                     lire_sauvegarde=faux_anneau, carnet_transport=faux_carnet())
     # 0.15 : l'adresse d'Immich pour le navigateur vient de l'annuaire de l'Anneau (faux, sans réseau)
     from app import maison
     main.ANNUAIRE = maison.Annuaire(url="http://anneau", jeton="j",
-                                    lire=lambda: [{"nom": "Immich", "locale": "http://photos.exemple"}])
+                                    lire=lambda: [{"nom": "Immich", "locale": "http://photos.exemple"},
+                                                         {"nom": "Carnet", "locale": "http://carnet.exemple"},
+                                                         {"nom": "Treemich", "locale": "http://arbre.exemple"}])
     # 0.5 : trois invitations de démonstration, notées dans invites.json pour les tests d'écran
     import threading
     import time

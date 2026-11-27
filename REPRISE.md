@@ -2,6 +2,8 @@
 
 Fichier à lire en premier dans une nouvelle session, et à mettre à jour à chaque fin de session, dans le même commit que le code.
 
+## État (27/11/2026) — 0.22.0 : arbre de famille en 3D. Serveur : `app/arbre.py` (`relies`, `generations` depuis la personne de départ, `statut` : decede / vivant / mineur / inconnu, centenaire = décédé), dans `main.py` section « arbre de famille (0.22) » : `_arbre_carnet` (GET carnet `/sillage/arbre`, contrat 1, gardé `MEMOIRE` s, 503 si carnet muet ou sans jeton), `GET /api/arbre/{immich}` (propriétaire ; `visages_arbre` = portraits permis), `GET /api/arbre/vignette/{immich}`, `GET /api/invite/{jeton}/arbre` (masquage serveur, ids `_arbre_op` = `_opaque(jeton, "arbre|"+tid)`, carte `arbres_invites[jeton]` = ops → tid et ops → visage), `…/arbre/vignette/{op}`, `POST …/arbre/proposition` (`PROPOSITIONS_MAX` 20, table `proposition` dans `base.py`, `_envoyer_propositions` après chaque proposition et la nuit ; 400 de carnet = « refusee »). `Base.invite` rend aussi `du`. Interface : `lib/Arbre.svelte` (plein écran, bascule, Liste, carte, formulaire invité, secours sans WebGL), `lib/arbre/scene.js` (prototype du 27/11 repris : InstancedMesh + atlas, LOD, transitions, `creerScene` → `basculer`, `choisir`, `relacher`, `recadrer`, `detruire`), `lib/arbre/parente.js` (`indexer`, `parente`). `Chemin.svelte` : `lireArbre` (bouton si `arbre`), `Invite.svelte` : `boutonArbre`. Démo : `tests/interface/serveur.py` `arbre_demo`, `faux_carnet` (jeton « jeton-demo », annuaire avec Carnet et Treemich). Tests : `tests/test_arbre.py`, `test_022_*`. Jamais essayé sur la vraie installation (vrai carnet 3.6, vrais visages, iPhone des invités).
+
 ## État (23/11/2026) — 0.21.3 : listes déroulantes lisibles en sombre (`frontend/src/app.css`, bloc « Listes déroulantes (socle 0.12.2) » : `select option, select optgroup` aux couleurs `--popover`). Jamais essayé sur la vraie installation.
 
 ## État (22/11/2026) — 0.21.2 : barre d'onglets collée en bas sur iPhone (`App.svelte`, classes du socle 0.12.1 : `fixed inset-x-0 bottom-0 … pb-[calc(0.375rem+env(safe-area-inset-bottom))]`, `md:right-auto md:justify-start`). Jamais essayé sur la vraie installation.
@@ -68,7 +70,7 @@ Fichier à lire en premier dans une nouvelle session, et à mettre à jour à ch
 - Personnes : carnet d'abord, Immich en secours.
 - « Raconter » retiré en 0.19 (18/11/2026) : aucun modèle du PC ne tient « rien d'inventé », le gabarit n'apporte pas assez.
 - Vue des invités (0.5.0, 0.8.0) : jeton par séjour, rien que le chemin et les photos phares (ouvrables en grand) ; le propriétaire garde seul corrections et Immich.
-- Hors V1 : page imprimable, arbre généalogique, vidéo, sillages croisés, « ce jour-là ».
+- Hors V1 : page imprimable, vidéo, sillages croisés, « ce jour-là ». (L'arbre généalogique est fait en 0.22, décision de Julien du 27/11/2026.)
 - Technique : celle du dépôt socle.
 
 ## Ce que la première sonde (11/11/2026) avait montré

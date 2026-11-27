@@ -1,5 +1,13 @@
 # Journal des versions
 
+## 0.22.0 — 27 novembre 2026 (arbre de famille en 3D)
+
+- **Arbre de famille** (demande de Julien du 27/11/2026, grill, conseil et prototype mesuré sur iPhone : 60 i/s à 400 personnes) : bouton « Arbre » sur le chemin d'une personne qui a au moins un lien dans Treemich ; tout l'arbre relié, en **constellation** ou en **hélice** (ancêtres en haut), bascule animée, dernière vue gardée sur l'appareil, rotation lente au repos (coupée si l'appareil réduit les animations), visages lointains en points lumineux, décédés en noir et blanc, ex-conjoints en pointillé, liste des personnes avec recherche, liste de secours sans WebGL. Couleurs : lavande et argent (l'or reste à l'Anneau).
+- **Carte d'une personne** : lien de parenté en clair (« Grand-mère de Camille »), dates ; propriétaire : « Voir son sillage », « Ouvrir dans carnet » ou « Ouvrir dans Treemich ».
+- **Invités** : bouton « Votre arbre de famille » sur leur page ; un seul arbre pour la chambre, invités mis en avant, légende par prénom. Règle du conseil appliquée côté serveur (vivants : année de naissance ; mineurs et âge inconnu : prénom seul, sans visage ; case « jamais aux invités » de carnet : point sans nom ; né il y a plus de 100 ans sans décès : considéré décédé). Identifiants opaques, comme pour les photos.
+- **Propositions des invités** : date, nom, lien ou personne manquante, avec un mot, 20 par invitation ; table `proposition`, envoi à carnet 3.6 (`POST /sillage/propositions`), renvoi si carnet est muet, effacées 90 jours après l'envoi.
+- `app/arbre.py` (parties reliées, générations, statuts) ; `frontend/src/lib/Arbre.svelte`, `lib/arbre/scene.js` (three.js 0.170.0, morceau chargé à l'ouverture), `lib/arbre/parente.js`. Le faux carnet de démonstration rend l'arbre (tests d'écran). Tests : `tests/test_arbre.py`, `test_022_*` (écran). Il faut carnet 3.6. Jamais essayé sur la vraie installation.
+
 ## 0.21.3 — 23 novembre 2026 (listes déroulantes lisibles en sombre)
 
 - **Listes déroulantes illisibles sur PC** (constaté par Julien dans Dîme, 23/11/2026) : la liste ouverte d'un `<select>` gardait un fond blanc tout en reprenant le texte crème de l'appli. `frontend/src/app.css` reprend le bloc du socle 0.12.2 (« Listes déroulantes (socle 0.12.2) ») : choix aux couleurs des menus, titres de groupe en gras, choix désactivés en gris.

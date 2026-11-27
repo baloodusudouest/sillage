@@ -49,6 +49,14 @@ Variables lues : `MAISON_PASSWORD`, `MAISON_JETON` (communes à la maison), `SIL
 
 - `GET /externe/personnes/<id Immich>/etapes` → `{"contrat": 1, "etapes": [{"nom": "Baptême de Camille", "annee": 1987, "photos": 3}]}` : les étapes nommées du chemin de cette personne, pour les suggestions « à valider » de la fiche complète de la Gazette. Mêmes règles que le chemin (photos visibles seulement, corrections de Julien comprises) ; étapes masquées et étapes sans nom écartées ; les plus fournies d'abord (à égalité, la plus ancienne), **60 au plus**. Personne inconnue de Sillage (ou identifiant mal formé) : `{"contrat": 1, "etapes": []}`, code 200. Lecture seule.
 
+## Arbre de famille en 3D (0.22)
+
+Sur le chemin d'une personne, le bouton **Arbre** ouvre son arbre relié (toutes les personnes reliées par un lien dans Treemich), en plein écran, en deux vues à basculer : **constellation** (visages flottants, liens lumineux) et **hélice** (un anneau par génération autour d'un axe lavande et argent, ancêtres en haut). La dernière vue est gardée sur l'appareil ; « Liste » montre et cherche les personnes. Pas de lien dans Treemich : pas de bouton. L'arbre vient de carnet 3.6 (`GET /sillage/arbre`, jeton commun `MAISON_JETON`), gardé dix minutes ; three.js n'est chargé qu'à l'ouverture.
+
+- **Propriétaire** (`GET /api/arbre/<id Immich>`, `GET /api/arbre/vignette/<id Immich>`) : nom, dates, lien de parenté ; « Voir son sillage », « Ouvrir dans carnet » (ou Treemich), selon l'annuaire de l'Anneau.
+- **Invités** (`GET /api/invite/<jeton>/arbre`, `…/arbre/vignette/<id>`) : un seul arbre pour la chambre, invités mis en avant. Masquage décidé par Sillage avant l'envoi : décédé (ou né il y a plus de 100 ans) = tout ; vivant majeur = nom, visage, année de naissance ; mineur ou âge inconnu = prénom seul, ni visage ni date ; case « jamais aux invités » de carnet = un point sans nom. Ni identifiant de Treemich, de carnet ni d'Immich côté invité. Plus rien après la fin du séjour (le jeton expire).
+- **Propositions des invités** (`POST /api/invite/<jeton>/arbre/proposition`) : date, nom, lien ou personne manquante, avec un mot ; 20 par invitation. Gardées par Sillage et envoyées à carnet (`POST /sillage/propositions`) ; carnet muet : renvoyées à la proposition suivante ou la nuit. Julien décide dans carnet › À traiter › Propositions d'invités ; rien n'est écrit sans lui.
+
 ## Tests
 
 ```

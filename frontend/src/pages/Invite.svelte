@@ -10,6 +10,7 @@
   import Album from '$lib/Album.svelte'
   import Croix from '$lib/Croix.svelte'
   import Signaler from '$lib/Signaler.svelte'
+  import Arbre from '$lib/Arbre.svelte'
 
   // apercu (0.6) : la même page, montrée au propriétaire dans l'onglet « Chambres »
   let { jeton, apercu = false } = $props()
@@ -22,6 +23,10 @@
   let avis = $state({})     // 0.17 : identifiant de photo → avis de l'invité ({ etat: 'signale' | 'regardee', … })
   let redatees = $state(0)  // 0.17 : avis de cette invitation acceptés ou corrigés par Julien
   let zoom = $state(null)   // 0.17 : la photo de « Aidez-moi à dater » ouverte en grand
+  // 0.22 : l'arbre de famille des invités (masqué côté serveur) ; pas de bouton s'ils ne sont pas dans l'arbre
+  let arbre = $state(null)
+  let restantes = $state(0)
+  let arbreOuvert = $state(false)
   const prendreAvis = (j) => { if (j) { avis = j.signalements || {}; redatees = j.photos_redatees || 0 } }
   const merci = (n) => n === 1 ? 'Grâce à vous, 1 photo a retrouvé son année.' : `Grâce à vous, ${n} photos ont retrouvé leur année.`
   // 0.11 : plusieurs invités : un clic sur un prénom ou sur « Ensemble » ne garde que ces étapes (plusieurs à la fois) ; rien de choisi = tout
@@ -67,10 +72,23 @@
       d = await r.json()
       prendreAvis(d)
     } catch (e) { erreur = e.message }
+    try {
+      const r = await fetch(`/api/invite/${encodeURIComponent(jeton)}/arbre`)
+      if (r.ok) { const j = await r.json(); arbre = j.arbre; restantes = j.propositions_restantes || 0 }
+    } catch { /* pas d'arbre : pas de bouton */ }
   })
 </script>
 
 <svelte:window onscroll={mesurer} onresize={mesurer} onkeydown={(ev) => { if (ev.key === 'Escape' && !album) { grande = null; zoom = null } }} />
+
+{#snippet boutonArbre()}
+  {#if arbre}
+    <button type="button" class="bouton-arbre" onclick={() => (arbreOuvert = true)}>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="5" r="2.2"/><circle cx="6" cy="19" r="2.2"/><circle cx="18" cy="19" r="2.2"/><path d="M12 7.2v4.3M12 11.5 6.8 16.9M12 11.5l5.2 5.4"/></svg>
+      Votre arbre de famille
+    </button>
+  {/if}
+{/snippet}
 
 {#snippet aidezMoi()}
   {#if d?.aidez?.length}
@@ -104,6 +122,7 @@
     <div class="accueil">
       <h1 class="plume">Bienvenue{d.invites.length ? ' ' + prenoms(d.invites) : ''}</h1>
       <p>Pas encore de souvenirs ici : les photos du séjour viendront.</p>
+      {@render boutonArbre()}
     </div>
     {#if redatees > 0}<p class="merci" role="status">{merci(redatees)}</p>{/if}
     {@render aidezMoi()}
@@ -120,6 +139,7 @@
         </ul>
       {/if}
       {#if redatees > 0}<p class="merci" role="status">{merci(redatees)}</p>{/if}
+      {@render boutonArbre()}
     </header>
 
     {#if chemins.length > 1}
@@ -168,6 +188,10 @@
     {@render aidezMoi()}
   {/if}
 </svelte:element>
+
+{#if arbreOuvert && arbre}
+  <Arbre {arbre} invite={{ jeton }} {apercu} {restantes} onfermer={() => (arbreOuvert = false)} />
+{/if}
 
 {#if zoom}
   <div class="grand" role="dialog" aria-modal="true" aria-label="Photo à dater">
@@ -249,6 +273,12 @@
   .onglets button[aria-pressed='true'] { background: var(--app); border-color: var(--app); color: var(--app-contraste); font-weight: 600; }
   /* 0.7 : une ligne, la légende, la bascule : la frise commence tout de suite (carte de chambre de 300 px) */
   .entete { display: grid; gap: 0.5rem; margin-bottom: 0.9rem; }
+  .bouton-arbre { justify-self: start; display: inline-flex; align-items: center; gap: 0.5rem; min-height: 2.75rem; padding: 0 1.1rem;
+                  border-radius: 999px; border: 1px solid var(--app); background: transparent; color: var(--foreground); font: inherit;
+                  font-size: 0.95rem; cursor: pointer; }
+  .bouton-arbre:hover { background: color-mix(in oklab, var(--app) 18%, transparent); }
+  .bouton-arbre svg { width: 1.15rem; height: 1.15rem; color: var(--app); }
+  .accueil .bouton-arbre { justify-self: center; }
   .entete h1 { margin: 0; font-size: 0.8rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted-foreground); }
   .legende { display: flex; flex-wrap: wrap; gap: 0.35rem 1rem; margin: 0; padding: 0; list-style: none; font-size: 0.92rem; }
   .legende li { display: inline-flex; }

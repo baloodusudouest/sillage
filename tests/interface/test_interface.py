@@ -217,7 +217,8 @@ def test_connexion_et_reglages(page):
     page.get_by_role("button", name="Vérifier").click()
     page.get_by_text("2 scans datés par estimation, dits « vers … » ; 1 en attente de date, hors du chemin.").wait_for()   # 0.14
     page.locator("#tuile-carnet").click()
-    page.get_by_text("MAISON_JETON (jeton commun de la maison)").wait_for()       # pas relié : la variable de la stack
+    page.get_by_role("button", name="Vérifier").click()                           # 0.22 : relié (faux carnet de démonstration)
+    page.get_by_text(re.compile(r"^Répond\. 0 fiche")).wait_for()
     page.goto(page.base + "/#/reglages")
     from app import __version__
     page.get_by_text(f"Sillage {__version__}").wait_for()
@@ -356,4 +357,61 @@ def test_014_scans_vers(page):
     assert scans.locator(".point.vers").count() == 1                                  # le point en pointillé
     assert page.get_by_text("1 scan pas encore daté").is_visible()
     assert page.get_by_role("button", name="Ajouter une date de décès").count() == 0   # 0.14.1 : pas de saisie dans Sillage
+    sans_debordement(page)
+
+
+# ------------------------------------------------------------ 0.22 : arbre de famille en 3D
+
+def _connecte(page, adresse):
+    page.goto(page.base + adresse)
+    if page.locator("#mot-de-passe").count():                                        # les tests de l'invité ont vidé les cookies
+        page.fill("#mot-de-passe", MDP)
+        page.click("button[type=submit]")
+        page.goto(page.base + adresse)
+
+
+def test_022_arbre_du_proprietaire(page):
+    _connecte(page, "/#/chemin/" + CAMILLE)
+    page.wait_for_selector(".etape")
+    page.get_by_role("button", name="Voir son arbre de famille").click()
+    arbre = page.get_by_role("dialog", name="L'arbre de Camille ROUSSEL")
+    arbre.wait_for()
+    page.locator(".arbre canvas").wait_for()
+    if page.get_by_role("button", name="Compris").count():
+        page.get_by_role("button", name="Compris").click()
+    page.get_by_role("button", name="Hélice").click()
+    assert page.get_by_role("button", name="Hélice").get_attribute("aria-pressed") == "true"
+    page.get_by_role("button", name="Liste").click()
+    page.locator(".panneau").get_by_role("button", name=re.compile("Hugo MARCHAND")).click()
+    carte = page.locator(".carte")
+    carte.get_by_text("Conjoint", exact=False).wait_for()
+    assert carte.get_by_role("link", name="Voir son sillage").count() == 1
+    assert carte.get_by_role("link", name="Ouvrir dans carnet").count() == 1
+    assert page.evaluate("localStorage.getItem('sillage-arbre-vue')") == "helice"
+    page.keyboard.press("Escape")                                                     # ferme la carte
+    page.keyboard.press("Escape")                                                     # ferme l'arbre
+    assert page.get_by_role("dialog").count() == 0
+    sans_debordement(page)
+
+
+def test_022_arbre_de_l_invite_et_proposition(page):
+    jetons = invitations()
+    page.context.clear_cookies()
+    page.goto(page.base + jetons["seule"])
+    page.get_by_role("button", name="Votre arbre de famille").click()
+    page.get_by_role("dialog", name="Votre arbre de famille").wait_for()
+    page.locator(".arbre canvas").wait_for()
+    page.get_by_role("button", name="Liste").click()
+    panneau = page.locator(".panneau")
+    noms = panneau.locator("button > span:first-child").all_inner_texts()
+    assert "Léa" in noms and "Léa MARCHAND" not in noms                               # mineure : prénom seulement
+    assert "Personne non montrée" in noms                                             # case « jamais aux invités »
+    panneau.get_by_role("button", name=re.compile("^Léa")).click()
+    carte = page.locator(".carte")
+    carte.get_by_text("Fille", exact=False).wait_for()
+    assert carte.get_by_role("link").count() == 0                                     # ni sillage, ni carnet, ni Immich
+    carte.get_by_role("button", name="Proposer une correction").click()
+    carte.get_by_label("La bonne date").fill("2016-05-02")
+    carte.get_by_role("button", name="Envoyer à Julien").click()
+    carte.get_by_text("Merci, c'est transmis à Julien").wait_for()
     sans_debordement(page)

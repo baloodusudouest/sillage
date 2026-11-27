@@ -48,7 +48,7 @@ from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from starlette.background import BackgroundTask
 
-from . import __version__, chemin as calcul, maison
+from . import __version__, arbre as A, chemin as calcul, maison
 from .base import ISSUES, SORTES, Base, quand_tz
 from .cache import Cache
 from .auth import COMMUN, DUREE, Sessions, en_https
@@ -77,6 +77,8 @@ GARDE_TRAITES = 90                        # jours pendant lesquels un avis trait
 REGARDEE_JOURS = 30                       # jours pendant lesquels l'invité lit « Julien a regardé, la date reste »
 ETAPES_MAX = 60                           # 0.20 : étapes rendues à la Gazette par /externe/personnes/…/etapes
 MERCI = "Merci, c'est transmis à Julien"
+PROPOSITIONS_MAX = 20                     # 0.22 : propositions sur l'arbre par invitation (au-delà : 429)
+ARBRE_MOT_MAX = 300                       # 0.22 : longueur du mot d'une proposition sur l'arbre
 TROP = "Julien a déjà beaucoup de photos à regarder : revenez un peu plus tard."
 
 
@@ -116,7 +118,7 @@ async def cycle(app: FastAPI):
                 personnes=None, lues={}, albums={}, connues={}, derniere_lecture=None, toutes=None, invites={}, reperes=None,
                 reglages=reglages_, base=Base(cfg.data / "sillage.db"),
                 cache=Cache(cfg.data / "vignettes", reglages_.get("cache_mo")),
-                fond=[], verrous={}, nuit=None)
+                fond=[], verrous={}, nuit=None, arbre=None, visages_arbre=set(), arbres_invites={})
     # 0.17 : clé des identifiants de photos montrés aux invités, tirée une fois et gardée dans la base
     if not ETAT["base"].reglage("cle_photos"):
         ETAT["base"].poser_reglage("cle_photos", secrets.token_hex(32))
@@ -652,6 +654,9 @@ def _rafraichir_tout() -> None:
     ETAT["albums"].clear()
     ETAT["toutes"] = None
     _effacer_avis_traites()
+    _envoyer_propositions()                      # 0.22 : propositions restées en attente (carnet muet)
+    ETAT["base"].effacer_propositions(GARDE_TRAITES)
+    ETAT["arbre"] = None
     _preparer([i["jeton"] for i in ETAT["base"].invitations()])
     ETAT["nuit"] = datetime.now().isoformat(timespec="seconds")
 
@@ -1006,6 +1011,237 @@ def etapes_de(immich_id: str, request: Request):
     toutes.sort(key=lambda e: (-e["nombre"], e["debut"]))
     return {"contrat": 1, "etapes": [{"nom": e["nom"], "annee": int(e["debut"][:4]), "photos": e["nombre"]}
                                      for e in toutes[:ETAPES_MAX]]}
+
+
+# ================================================================ arbre de famille (0.22)
+
+def _carnet_appel(methode: str, chemin: str, **kw) -> httpx.Response:
+    cfg = ETAT["cfg"]
+    with httpx.Client(timeout=15, transport=ETAT.get("carnet_transport")) as client:
+        return client.request(methode, cfg.carnet_url + chemin, headers={"Authorization": f"Bearer {cfg.jeton}"}, **kw)
+
+
+def _arbre_carnet() -> dict:
+    """L'arbre complet tenu par carnet (contrat 1), gardé dix minutes. carnet absent ou muet : 503 (l'écran le dit)."""
+    garde_ = ETAT.get("arbre")
+    if garde_ and time.monotonic() - garde_[0] < MEMOIRE:
+        return garde_[1]
+    if not ETAT["cfg"].jeton:
+        raise HTTPException(503, "Sillage n'a pas le jeton commun : l'arbre vient de carnet.")
+    try:
+        r = _carnet_appel("GET", "/sillage/arbre")
+        if r.status_code in (401, 404):
+            raise HTTPException(503, "carnet refuse le jeton commun, ou n'a pas encore l'arbre (carnet 3.6).")
+        r.raise_for_status()
+        g = r.json()
+        if g.get("contrat") != 1 or not isinstance(g.get("personnes"), list) or not isinstance(g.get("liens"), list):
+            raise ValueError("forme inattendue")
+    except (httpx.HTTPError, ValueError) as exc:
+        log.warning("Arbre de carnet illisible : %s", exc.__class__.__name__)
+        raise HTTPException(503, "carnet ne répond pas : l'arbre n'est pas disponible pour l'instant.")
+    ETAT["arbre"] = (time.monotonic(), g)
+    return g
+
+
+def _vignette_personne(immich: str) -> Response:
+    """Le visage d'une personne d'Immich (portrait), gardé sur disque comme les vignettes."""
+    cle = f"personne-{immich}"
+    garde_ = ETAT["cache"].lire(cle)
+    if garde_:
+        return _image(*garde_)
+    contenu, sorte = ETAT["immich"].image(f"/people/{immich}/thumbnail", "la lecture d'un portrait")
+    ETAT["cache"].garder(cle, contenu, sorte)
+    return _image(contenu, sorte)
+
+
+@app.get("/api/arbre/{personne}")
+def arbre_de(personne: str, request: Request):
+    """L'arbre relié à cette personne (identifiant Immich), pour le propriétaire. Sans lien dans Treemich : pas d'arbre."""
+    g = _arbre_carnet()
+    depart = next((p["id"] for p in g["personnes"] if p.get("immich") == personne), None)
+    if not depart or not A.a_des_liens(g, depart):
+        return {"arbre": None}
+    ids = A.relies(g, [depart])
+    rangs = A.generations(ids, g["liens"], depart)
+    try:
+        connues = _personnes()
+    except ErreurImmich:
+        connues = {}
+    gens = []
+    for p in g["personnes"]:
+        if p["id"] not in ids:
+            continue
+        immich = p.get("immich") if p.get("immich") and UUID.match(p["immich"]) else None
+        if immich:
+            ETAT["visages_arbre"].add(immich)
+        gens.append({"id": p["id"], "nom": p.get("nom") or "", "genre": p.get("genre") or "",
+                     "naissance": p.get("naissance") or "", "deces": p.get("deces") or "", "decede": bool(p.get("decede")),
+                     "generation": rangs.get(p["id"], 0), "visage": immich, "sillage": immich if immich in connues else None,
+                     "carnet_uid": p.get("carnet_uid"), "masque_invites": bool(p.get("masque_invites"))})
+    hote = request.headers.get("host", "")
+    return {"arbre": {"depart": depart, "personnes": gens,
+                      "liens": [l for l in g["liens"] if l["de"] in ids and l["vers"] in ids],
+                      "carnet": ANNUAIRE.adresse("Carnet", prive=maison.est_prive(hote)),
+                      "treemich": ANNUAIRE.adresse("Treemich", prive=maison.est_prive(hote))}}
+
+
+@app.get("/api/arbre/vignette/{immich}")
+def arbre_vignette(immich: str):
+    """Le visage d'une personne d'un arbre déjà ouvert (Sillage n'ouvre pas tous les portraits d'Immich)."""
+    if not UUID.match(immich) or immich not in ETAT["visages_arbre"]:
+        raise HTTPException(404, "Personne inconnue de cet arbre.")
+    return _vignette_personne(immich)
+
+
+def _arbre_op(jeton: str, tid: str) -> str:
+    return _opaque(jeton, "arbre|" + tid)
+
+
+def _arbre_invitation(jeton: str) -> tuple[dict, dict, list[str]]:
+    """L'invitation, l'arbre de carnet et les personnes de l'arbre qui sont les invités (dans l'ordre de l'invitation)."""
+    inv = ETAT["base"].invite(jeton)
+    if not inv:
+        raise HTTPException(404, "Cette invitation n'existe pas ou a expiré.")
+    g = _arbre_carnet()
+    par_immich = {p["immich"]: p["id"] for p in g["personnes"] if p.get("immich")}
+    departs = [par_immich[x["id"]] for x in inv["personnes"] if x.get("id") in par_immich]
+    return inv, g, [d for d in departs if A.a_des_liens(g, d)]
+
+
+@app.get("/api/invite/{jeton}/arbre")
+def arbre_invite(jeton: str):
+    """L'arbre des invités d'une chambre : un seul arbre, les invités mis en avant. Masquage décidé ici (voir app/arbre.py) ;
+    ni identifiant de Treemich, ni de carnet, ni d'Immich."""
+    inv, g, departs = _arbre_invitation(jeton)
+    if not departs:
+        return {"arbre": None}
+    ids = A.relies(g, departs)
+    rangs = A.generations(ids, g["liens"], departs[0])
+    aujourd_hui = date.today()
+    ops, visages, gens = {}, {}, []
+    for p in g["personnes"]:
+        if p["id"] not in ids:
+            continue
+        op = _arbre_op(jeton, p["id"])
+        ops[op] = p["id"]
+        st = "masque" if p.get("masque_invites") else A.statut(p, aujourd_hui)
+        immich = p.get("immich") if p.get("immich") and UUID.match(p["immich"]) else None
+        sortie = {"id": op, "generation": rangs.get(p["id"], 0), "statut": st, "nom": "", "genre": "",
+                  "naissance": "", "deces": "", "decede": False, "visage": False,
+                  "invite": p["id"] in departs}
+        if st != "masque":
+            sortie["genre"] = p.get("genre") or ""
+        if st == "decede":
+            sortie.update(nom=p.get("nom") or "", naissance=p.get("naissance") or "", deces=p.get("deces") or "",
+                          decede=True, visage=bool(immich))
+        elif st == "vivant":
+            a = A.annee(p.get("naissance"))
+            sortie.update(nom=p.get("nom") or "", naissance=str(a) if a else "", visage=bool(immich))
+        elif st in ("mineur", "inconnu"):
+            sortie["nom"] = A.prenom(p.get("nom") or "")
+        if sortie["visage"]:
+            visages[op] = immich
+        gens.append(sortie)
+    liens = [{**{k: v for k, v in l.items() if k not in ("de", "vers")},
+              "de": _arbre_op(jeton, l["de"]), "vers": _arbre_op(jeton, l["vers"])}
+             for l in g["liens"] if l["de"] in ids and l["vers"] in ids]
+    ETAT["arbres_invites"][jeton] = {"ops": ops, "visages": visages}
+    noms = {x["id"]: x["nom"] for x in inv["personnes"] if x.get("id")}
+    par_tid = {p["id"]: p.get("immich") for p in g["personnes"]}
+    invites = [{"id": _arbre_op(jeton, d), "prenom": A.prenom(noms.get(par_tid.get(d), ""))} for d in departs]
+    return {"arbre": {"depart": _arbre_op(jeton, departs[0]), "invites": invites, "personnes": gens, "liens": liens},
+            "propositions_restantes": max(0, PROPOSITIONS_MAX - ETAT["base"].propositions_de(jeton))}
+
+
+@app.get("/api/invite/{jeton}/arbre/vignette/{op}")
+def arbre_invite_vignette(jeton: str, op: str):
+    if not ETAT["base"].invite(jeton):
+        raise HTTPException(404, "Cette invitation n'existe pas ou a expiré.")
+    immich = ETAT["arbres_invites"].get(jeton, {}).get("visages", {}).get(op) if OPAQUE.match(op or "") else None
+    if not immich:
+        raise HTTPException(404, "Personne inconnue de cet arbre.")
+    return _vignette_personne(immich)
+
+
+TYPES_PROPOSITION = {"date": ("naissance", "deces", "mariage"), "nom": ("prenom", "nom"), "lien": (), "personne": ()}
+LIENS_PROPOSITION = ("parent", "enfant", "conjoint", "frere_soeur", "autre")
+DATE_PROPOSEE = re.compile(r"^\d{4}(-\d{2}(-\d{2})?)?$")
+
+
+def _texte_libre(brut, longueur: int, quoi: str) -> str:
+    if brut is None:
+        return ""
+    if not isinstance(brut, str):
+        raise HTTPException(422, f"{quoi} : un texte est attendu.")
+    texte = " ".join("".join(" " if unicodedata.category(c) in ("Cc", "Zl", "Zp") else c for c in brut).split())
+    if len(texte) > longueur:
+        raise HTTPException(422, f"{quoi} : trop long ({longueur} caractères au plus).")
+    return texte
+
+
+@app.post("/api/invite/{jeton}/arbre/proposition")
+def arbre_proposition(jeton: str, corps: dict = Body(...)):
+    """Un invité propose une correction sur l'arbre (date, nom, lien ou personne manquante). Gardée ici, envoyée à carnet
+    (« À traiter ») ; rien n'est écrit ailleurs. 20 propositions par invitation au plus."""
+    inv, g, departs = _arbre_invitation(jeton)
+    carte = ETAT["arbres_invites"].get(jeton, {}).get("ops", {})
+    if not isinstance(corps, dict):
+        raise HTTPException(422, "Proposition illisible.")
+    tid = carte.get(str(corps.get("personne") or ""))
+    if not tid:
+        raise HTTPException(404, "Personne inconnue de cet arbre : rouvrez l'arbre.")
+    type_ = corps.get("type")
+    if type_ not in TYPES_PROPOSITION:
+        raise HTTPException(422, "Type de proposition inconnu.")
+    champ = str(corps.get("champ") or "")
+    valeur = _texte_libre(corps.get("valeur"), 80, "La valeur")
+    mot = _texte_libre(corps.get("mot"), ARBRE_MOT_MAX, "Le mot")
+    lien = str(corps.get("lien") or "")
+    if TYPES_PROPOSITION[type_] and champ not in TYPES_PROPOSITION[type_]:
+        raise HTTPException(422, "Champ inconnu.")
+    if type_ == "date" and valeur and not DATE_PROPOSEE.match(valeur):
+        raise HTTPException(422, "Une date AAAA, AAAA-MM ou AAAA-MM-JJ est attendue.")
+    if type_ == "nom" and not valeur:
+        raise HTTPException(422, "Écrivez le nom tel qu'il devrait être.")
+    if type_ == "lien" and lien not in LIENS_PROPOSITION:
+        raise HTTPException(422, "Lien inconnu.")
+    if type_ in ("lien", "personne") and not (mot or valeur):
+        raise HTTPException(422, "Dites en quelques mots ce qui manque.")
+    autre = carte.get(str(corps.get("autre") or "")) if corps.get("autre") else None
+    noms = {p["id"]: p.get("nom") or "" for p in g["personnes"]}
+    fin = (datetime.fromisoformat(inv["expire"]).date() - timedelta(days=1)).isoformat()
+    envoi = {"id": secrets.token_urlsafe(12), "personne": tid, "nom": noms.get(tid, ""), "type": type_,
+             "champ": champ if TYPES_PROPOSITION[type_] else "", "valeur": valeur, "autre": autre,
+             "autre_nom": noms.get(autre, "") if autre else "", "lien": lien if type_ == "lien" else "", "mot": mot,
+             "invites": [A.prenom(x["nom"]) for x in inv["personnes"] if A.prenom(x.get("nom") or "")],
+             "sejour": {"du": inv.get("du") or "", "au": fin}}
+    if not ETAT["base"].proposer(jeton, envoi, PROPOSITIONS_MAX):
+        raise HTTPException(429, TROP)
+    _envoyer_propositions()
+    return {"message": MERCI, "propositions_restantes": max(0, PROPOSITIONS_MAX - ETAT["base"].propositions_de(jeton))}
+
+
+def _envoyer_propositions() -> int:
+    """Envoie à carnet les propositions en attente (POST /sillage/propositions, jeton commun). carnet muet : elles
+    restent et repartent à la prochaine proposition ou la nuit. Refusée par carnet (400) : marquée, plus renvoyée."""
+    if not ETAT["cfg"].jeton:
+        return 0
+    envoyees = 0
+    for p in ETAT["base"].propositions_a_envoyer():
+        try:
+            r = _carnet_appel("POST", "/sillage/propositions", json=p["corps"])
+        except httpx.HTTPError as exc:
+            log.warning("Proposition non envoyée à carnet : %s", exc.__class__.__name__)
+            break
+        if r.status_code == 200:
+            ETAT["base"].proposition_envoyee(p["id"])
+            envoyees += 1
+        elif r.status_code == 400:
+            log.warning("Proposition refusée par carnet : %s", r.text[:200])
+            ETAT["base"].proposition_envoyee(p["id"], "refusee")
+        else:
+            break
+    return envoyees
 
 
 # ================================================================ images (derrière la session)

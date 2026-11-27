@@ -7,6 +7,6 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   plugins: [svelte(), tailwindcss()],
   resolve: { alias: { $lib: fileURLToPath(new URL('./src/lib', import.meta.url)) } },
-  build: { outDir: '../app/static', emptyOutDir: true },
+  build: { outDir: '../app/static', emptyOutDir: true, chunkSizeWarningLimit: 600 },   // 0.22 : three.js seul dans son morceau, chargé à l'ouverture de l'arbre
   server: { proxy: { '/api': 'http://127.0.0.1:8090', '/health': 'http://127.0.0.1:8090' } },
 })

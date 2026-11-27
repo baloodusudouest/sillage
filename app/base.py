@@ -50,6 +50,11 @@ class Base:
                                                     traite_le TEXT, issue TEXT);
             CREATE UNIQUE INDEX IF NOT EXISTS signalement_actif ON signalement (jeton, asset) WHERE traite_le IS NULL;
             CREATE INDEX IF NOT EXISTS signalement_asset ON signalement (asset);
+            -- 0.22 : corrections proposées par les invités depuis l'arbre, envoyées à carnet (« À traiter »).
+            -- `corps` est déjà la forme reçue par carnet (identifiants de Treemich), pour pouvoir renvoyer plus tard.
+            CREATE TABLE IF NOT EXISTS proposition (id TEXT PRIMARY KEY, jeton TEXT NOT NULL, corps TEXT NOT NULL,
+                                                    le TEXT NOT NULL, envoyee_le TEXT, etat TEXT NOT NULL DEFAULT 'attente');
+            CREATE INDEX IF NOT EXISTS proposition_jeton ON proposition (jeton);
         """)
         # 0.6 : date d'arrivée, pour l'onglet « Chambres » (bases de la 0.5 : colonne ajoutée)
         if "du" not in [l["name"] for l in self._c.execute("PRAGMA table_info(invites)")]:
@@ -82,7 +87,8 @@ class Base:
         with self._verrou:
             l = self._c.execute("SELECT * FROM invites WHERE jeton = ? AND expire > ?",
                                 (jeton, datetime.now().isoformat(timespec="seconds"))).fetchone()
-        return {"chambre": l["chambre"], "personnes": json.loads(l["personnes"]), "expire": l["expire"]} if l else None
+        return ({"chambre": l["chambre"], "personnes": json.loads(l["personnes"]), "expire": l["expire"], "du": l["du"]}
+                if l else None)
 
     def poser_invite(self, chambre: str, personnes: list[dict], expire: str, du: str = "") -> str:
         """Une invitation par chambre : la même si rien n'a changé, sinon une nouvelle (l'ancienne ne marche plus).
@@ -217,3 +223,34 @@ class Base:
                      if quand_tz(l["traite_le"]) <= limite]
             self._c.executemany("DELETE FROM signalement WHERE id = ?", vieux)
         return len(vieux)
+
+    # ------------------------------------------------------------ 0.22 : propositions des invités sur l'arbre
+    def proposer(self, jeton: str, corps: dict, limite: int) -> str | None:
+        """Garde une proposition ; None si l'invitation en a déjà `limite`."""
+        with self._verrou, self._c:
+            n = self._c.execute("SELECT COUNT(*) FROM proposition WHERE jeton = ?", (jeton,)).fetchone()[0]
+            if n >= limite:
+                return None
+            ident = corps["id"]
+            self._c.execute("INSERT INTO proposition(id, jeton, corps, le) VALUES (?, ?, ?, ?)",
+                            (ident, jeton, json.dumps(corps, ensure_ascii=False), maintenant_tz()))
+        return ident
+
+    def propositions_de(self, jeton: str) -> int:
+        with self._verrou:
+            return self._c.execute("SELECT COUNT(*) FROM proposition WHERE jeton = ?", (jeton,)).fetchone()[0]
+
+    def propositions_a_envoyer(self) -> list[dict]:
+        with self._verrou:
+            return [{"id": l["id"], "corps": json.loads(l["corps"])}
+                    for l in self._c.execute("SELECT id, corps FROM proposition WHERE etat = 'attente' ORDER BY le")]
+
+    def proposition_envoyee(self, ident: str, etat: str = "envoyee") -> None:
+        with self._verrou, self._c:
+            self._c.execute("UPDATE proposition SET etat = ?, envoyee_le = ? WHERE id = ?", (etat, maintenant_tz(), ident))
+
+    def effacer_propositions(self, jours: int = 90) -> int:
+        """Les propositions envoyées (ou refusées par carnet) depuis plus de `jours` jours sont effacées."""
+        limite = (datetime.now().astimezone() - timedelta(days=jours)).isoformat(timespec="seconds")
+        with self._verrou, self._c:
+            return self._c.execute("DELETE FROM proposition WHERE etat != 'attente' AND envoyee_le < ?", (limite,)).rowcount
