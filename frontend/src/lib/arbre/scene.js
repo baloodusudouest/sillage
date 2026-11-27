@@ -1,4 +1,5 @@
-// 0.22 : la scène 3D de l'arbre (constellation et hélice), chargée seulement à l'ouverture de l'arbre.
+// 0.22 : la scène 3D de l'arbre en hélice, chargée seulement à l'ouverture de cette vue (0.23 : constellation retirée,
+// illisible selon Julien ; chemin entre deux personnes surligné avec `surligner`).
 // Une seule scène : un InstancedMesh pour tous les visages (un appel de dessin), des segments pour les liens,
 // un ciel étoilé. Deux dispositions calculées une fois ; la bascule les fait glisser de l'une à l'autre.
 // Visages : atlas de vignettes (128 px, 64 px au-delà de 1 024 personnes), rempli au fil du chargement.
@@ -18,35 +19,6 @@ function initiales(nom) {
 }
 
 // ---------------------------------------------------------------- dispositions
-
-function constellation(P, L, index) {
-  const n = P.length, r = hasard(9), pos = new Float32Array(n * 3), v = new Float32Array(n * 3)
-  const gmax = Math.max(0, ...P.map((p) => p.generation))
-  const hauteur = (p) => (gmax / 2 - p.generation) * 4
-  P.forEach((p, i) => { pos[i * 3] = (r() - 0.5) * 40; pos[i * 3 + 1] = hauteur(p) + (r() - 0.5) * 6; pos[i * 3 + 2] = (r() - 0.5) * 40 })
-  const paires = L.map((l) => [index.get(l.de), index.get(l.vers), l.type === 'parent' ? 3.2 : 1.6]).filter(([a, b]) => a != null && b != null)
-  const tours = n > 600 ? 140 : 220
-  for (let t = 0; t < tours; t++) {
-    const k = 1 - t / tours
-    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
-      let dx = pos[i * 3] - pos[j * 3], dy = pos[i * 3 + 1] - pos[j * 3 + 1], dz = pos[i * 3 + 2] - pos[j * 3 + 2]
-      const d2 = dx * dx + dy * dy + dz * dz + 0.01
-      if (d2 > 400) continue
-      const f = 2.6 / d2; dx *= f; dy *= f; dz *= f
-      v[i * 3] += dx; v[i * 3 + 1] += dy; v[i * 3 + 2] += dz; v[j * 3] -= dx; v[j * 3 + 1] -= dy; v[j * 3 + 2] -= dz
-    }
-    for (const [a, b, repos] of paires) {
-      const dx = pos[b * 3] - pos[a * 3], dy = pos[b * 3 + 1] - pos[a * 3 + 1], dz = pos[b * 3 + 2] - pos[a * 3 + 2]
-      const d = Math.sqrt(dx * dx + dy * dy + dz * dz) + 1e-4, f = (d - repos) * 0.09 / d
-      v[a * 3] += dx * f; v[a * 3 + 1] += dy * f; v[a * 3 + 2] += dz * f; v[b * 3] -= dx * f; v[b * 3 + 1] -= dy * f; v[b * 3 + 2] -= dz * f
-    }
-    for (let i = 0; i < n; i++) {
-      v[i * 3 + 1] += (hauteur(P[i]) - pos[i * 3 + 1]) * 0.02          // les générations restent à peu près en couches
-      for (let c = 0; c < 3; c++) { pos[i * 3 + c] += Math.max(-2, Math.min(2, v[i * 3 + c])) * k; v[i * 3 + c] *= 0.5 }
-    }
-  }
-  return pos
-}
 
 function ordreFamilial(P, L, index) {
   // Parcours en profondeur depuis les plus anciens : une famille reste groupée sur son anneau
@@ -150,7 +122,8 @@ export function webglPossible() {
   try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')) } catch { return false }
 }
 
-export function creerScene(conteneur, donnees, { vue = 'constellation', surChoix = () => {} } = {}) {
+export function creerScene(conteneur, donnees, { surChoix = () => {} } = {}) {
+  const vue = 'helice'
   const reduit = matchMedia('(prefers-reduced-motion: reduce)').matches
   const P = donnees.personnes, L = donnees.liens
   const index = new Map(P.map((p, i) => [p.id, i]))
@@ -189,10 +162,10 @@ export function creerScene(conteneur, donnees, { vue = 'constellation', surChoix
     return m
   })()
 
-  const posA = { constellation: constellation(P, L, index), helice: null }
+  const posA = { helice: null }
   const H = helice(P, L, index)
   posA.helice = H.pos
-  const posCour = new Float32Array(posA[vue] || posA.constellation)
+  const posCour = new Float32Array(posA.helice)
   const A = atlas(P, maxTex)
   const arreterVisages = chargerVisages(P, A)
 
@@ -204,7 +177,7 @@ export function creerScene(conteneur, donnees, { vue = 'constellation', surChoix
   geo.setAttribute('uv', plan.getAttribute('uv'))
   geo.instanceCount = P.length
   const off = new THREE.InstancedBufferAttribute(posCour, 3); off.setUsage(THREE.DynamicDrawUsage)
-  const cellUV = new Float32Array(P.length * 2), drap = new Float32Array(P.length * 4)
+  const cellUV = new Float32Array(P.length * 2), drap = new Float32Array(P.length * 4), lum = new Float32Array(P.length)
   P.forEach((p, i) => {
     cellUV[i * 2] = (i % A.cols) * A.cell / A.w
     cellUV[i * 2 + 1] = 1 - (Math.floor(i / A.cols) + 1) * A.cell / A.h
@@ -216,18 +189,20 @@ export function creerScene(conteneur, donnees, { vue = 'constellation', surChoix
   geo.setAttribute('offset', off)
   geo.setAttribute('cellUV', new THREE.InstancedBufferAttribute(cellUV, 2))
   geo.setAttribute('drap', new THREE.InstancedBufferAttribute(drap, 4))
+  const attrLum = new THREE.InstancedBufferAttribute(lum, 1); geo.setAttribute('lum', attrLum)
   const mat = new THREE.ShaderMaterial({
     transparent: true, depthWrite: false,
     uniforms: {
       atlas: { value: A.tex }, cellSize: { value: new THREE.Vector2(A.cell / A.w, A.cell / A.h) },
-      carte: { value: vue === 'helice' ? 1 : 0 }, t: { value: 0 }, haut: { value: 800 }, sel: { value: -1 },
+      carte: { value: 1 }, t: { value: 0 }, haut: { value: 800 }, sel: { value: -1 }, surligne: { value: 0 },
       lav: { value: LAVANDE }, arg: { value: ARGENT },
     },
     vertexShader: `
-      attribute vec3 offset; attribute vec2 cellUV; attribute vec4 drap;
-      uniform float carte, t, haut, sel; varying vec2 vUv, vCell; varying float vMort, vFocus, vLoin, vScint;
+      attribute vec3 offset; attribute vec2 cellUV; attribute vec4 drap; attribute float lum;
+      uniform float carte, t, haut, sel, surligne; varying vec2 vUv, vCell; varying float vMort, vFocus, vLoin, vScint, vEteint;
       void main(){
-        vUv = uv; vCell = cellUV; vMort = drap.x; vFocus = max(drap.y, float(gl_InstanceID)==sel ? 1. : 0.);
+        vUv = uv; vCell = cellUV; vMort = drap.x; vFocus = max(max(drap.y, float(gl_InstanceID)==sel ? 1. : 0.), lum);
+        vEteint = surligne * (1. - lum);
         vScint = .5 + .5*sin(t*1.7 + drap.z);
         vec4 mv = modelViewMatrix * vec4(offset, 1.);
         float s = mix(1.7, 1.6, carte) * (1. + .35*vFocus) * mix(1., .55, drap.w);
@@ -238,7 +213,7 @@ export function creerScene(conteneur, donnees, { vue = 'constellation', surChoix
       }`,
     fragmentShader: `
       uniform sampler2D atlas; uniform vec2 cellSize; uniform float carte; uniform vec3 lav, arg;
-      varying vec2 vUv, vCell; varying float vMort, vFocus, vLoin, vScint;
+      varying vec2 vUv, vCell; varying float vMort, vFocus, vLoin, vScint, vEteint;
       float boite(vec2 p, vec2 b, float r){ vec2 q = abs(p)-b+r; return length(max(q,0.))+min(max(q.x,q.y),0.)-r; }
       void main(){
         vec2 p = (vUv - .5) * 1.4;
@@ -254,6 +229,7 @@ export function creerScene(conteneur, donnees, { vue = 'constellation', surChoix
         float r = length(p) / 1.4;
         float etoile = exp(-r*r*40.) * (.6 + .4*vScint) + exp(-r*9.)*.25;
         gl_FragColor = mix(corps, vec4(halo * etoile * 1.4, etoile), vLoin);
+        gl_FragColor *= mix(1., .15, vEteint);
         if (gl_FragColor.a < .01) discard;
       }`,
   })
@@ -276,7 +252,7 @@ export function creerScene(conteneur, donnees, { vue = 'constellation', surChoix
     segments((l) => !l.divorce, (l) => (l.type === 'conjoint' ? ARGENT : l.type === 'fratrie' ? PALE : LAVANDE)),
     new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false }))
   const lignesEx = new THREE.LineSegments(segments((l) => !!l.divorce, () => ARGENT),
-    new THREE.LineDashedMaterial({ color: ARGENT, dashSize: 0.35, gapSize: 0.35, transparent: true, opacity: 0.5, depthWrite: false }))
+    new THREE.LineDashedMaterial({ vertexColors: true, dashSize: 0.35, gapSize: 0.35, transparent: true, opacity: 0.5, depthWrite: false }))
   monde.add(lignes, lignesEx)
   jetables.push(lignes.material, lignesEx.material)
 
@@ -302,7 +278,6 @@ export function creerScene(conteneur, donnees, { vue = 'constellation', surChoix
   }
   monde.add(axe, anneaux)
   const regler = (grp, a) => { grp.traverse((o) => { if (o.material) { o.material.userData.o0 ??= o.material.opacity; o.material.opacity = o.material.userData.o0 * a } }); grp.visible = a > 0.01 }
-  regler(axe, vue === 'helice' ? 1 : 0); regler(anneaux, vue === 'helice' ? 1 : 0)
 
   function majPositions() {
     for (const ls of [lignes, lignesEx]) {
@@ -324,7 +299,7 @@ export function creerScene(conteneur, donnees, { vue = 'constellation', surChoix
   const rayon = (pos) => { let m = 0; for (let i = 0; i < pos.length; i += 3) m = Math.max(m, Math.hypot(pos[i], pos[i + 1], pos[i + 2])); return m }
   function cadrer(v, anime = true) {
     const portrait = conteneur.clientWidth < conteneur.clientHeight
-    const d = rayon(posA[v]) * (v === 'helice' ? (portrait ? 2.6 : 1.9) : (portrait ? 1.9 : 1.25)) + 6
+    const d = rayon(posA[v]) * (portrait ? 2.6 : 1.9) + 6
     const cv = new THREE.Vector3(0, v === 'helice' ? d * 0.28 : d * 0.12, d)
     if (!anime || reduit) { camera.position.copy(cv); controls.target.set(0, 0, 0); return }
     vol = { t0: performance.now(), de: controls.target.clone(), vers: new THREE.Vector3(), cd: camera.position.clone(), cv }
@@ -411,12 +386,18 @@ export function creerScene(conteneur, donnees, { vue = 'constellation', surChoix
   document.addEventListener('visibilitychange', surVisibilite)
 
   return {
-    basculer(vers) {
-      if (vers === mode || !posA[vers]) return
-      trans = { de: new Float32Array(posCour), vers: posA[vers], t0: performance.now(), dur: reduit ? 1 : 1600, cible: vers }
-      mode = vers
-      choisir(-1, false)
-      cadrer(vers)
+    surligner(chemin) {
+      // Le chemin entre deux personnes brille ; le reste s'estompe (null : tout revient)
+      mat.uniforms.surligne.value = chemin ? 1 : 0
+      P.forEach((p, i) => { lum[i] = chemin?.ids.has(p.id) ? 1 : 0 }); attrLum.needsUpdate = true
+      for (const ls of [lignes, lignesEx]) {
+        const c = ls.geometry.getAttribute('color'), orig = ls.geometry.userData.orig ||= Float32Array.from(c.array)
+        ls.geometry.userData.liens.forEach((l, i) => {
+          const allume = chemin?.aretes.has(l.de + '|' + l.vers)
+          for (const k of [0, 3]) for (let j = 0; j < 3; j++) c.array[i * 6 + k + j] = allume ? 1 : orig[i * 6 + k + j] * (chemin ? 0.18 : 1)
+        })
+        c.needsUpdate = true
+      }
     },
     choisir: (id) => { const i = index.get(id); if (i != null) choisir(i) },
     relacher: () => choisir(-1, false),

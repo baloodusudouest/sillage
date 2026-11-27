@@ -371,24 +371,39 @@ def _connecte(page, adresse):
 
 
 def test_022_arbre_du_proprietaire(page):
+    """0.23 : cinq vues (Éventail, Sablier, Arbre, Vie 3D, Hélice ; plus de constellation), carte d'une personne, et
+    « Lien avec… » qui dit le lien et l'écrit en étapes."""
     _connecte(page, "/#/chemin/" + CAMILLE)
     page.wait_for_selector(".etape")
     page.get_by_role("button", name="Voir son arbre de famille").click()
-    arbre = page.get_by_role("dialog", name="L'arbre de Camille ROUSSEL")
-    arbre.wait_for()
-    page.locator(".arbre canvas").wait_for()
+    page.get_by_role("dialog", name="L'arbre de Camille ROUSSEL").wait_for()
     if page.get_by_role("button", name="Compris").count():
         page.get_by_role("button", name="Compris").click()
-    page.get_by_role("button", name="Hélice").click()
-    assert page.get_by_role("button", name="Hélice").get_attribute("aria-pressed") == "true"
+    assert page.get_by_role("button", name="Constellation").count() == 0
+    page.locator("svg.plan .personne").first.wait_for()                              # éventail à plat par défaut
+    for vue in ("Vie 3D", "Hélice"):
+        page.get_by_role("button", name=vue, exact=True).click()
+        page.locator(".arbre canvas").wait_for()
+        assert page.get_by_role("button", name=vue, exact=True).get_attribute("aria-pressed") == "true"
+    for vue in ("Sablier", "Arbre"):
+        page.get_by_role("button", name=vue, exact=True).click()
+        page.locator("svg.plan .personne").first.wait_for()
+    assert page.evaluate("localStorage.getItem('sillage-arbre-vue')") == "complet"
     page.get_by_role("button", name="Liste").click()
     page.locator(".panneau").get_by_role("button", name=re.compile("Hugo MARCHAND")).click()
     carte = page.locator(".carte")
-    carte.get_by_text("Conjoint", exact=False).wait_for()
+    carte.get_by_text("Conjoint de Camille", exact=False).wait_for()
     assert carte.get_by_role("link", name="Voir son sillage").count() == 1
     assert carte.get_by_role("link", name="Ouvrir dans carnet").count() == 1
-    assert page.evaluate("localStorage.getItem('sillage-arbre-vue')") == "helice"
-    page.keyboard.press("Escape")                                                     # ferme la carte
+    # Hugo est maintenant au centre : « Lien avec… » Léa
+    page.get_by_role("button", name="Lien avec…").click()
+    page.locator(".panneau").get_by_role("button", name=re.compile("^Léa MARCHAND")).click()
+    resultat = page.locator(".resultat")
+    resultat.get_by_text("fille de Hugo", exact=False).wait_for()
+    assert "sa fille Léa" in resultat.inner_text()
+    assert page.locator("svg.plan .personne[opacity='1']").count() == 2              # seul le chemin reste allumé
+    page.keyboard.press("Escape")                                                     # efface le lien
+    assert page.locator(".resultat").count() == 0
     page.keyboard.press("Escape")                                                     # ferme l'arbre
     assert page.get_by_role("dialog").count() == 0
     sans_debordement(page)
@@ -400,7 +415,7 @@ def test_022_arbre_de_l_invite_et_proposition(page):
     page.goto(page.base + jetons["seule"])
     page.get_by_role("button", name="Votre arbre de famille").click()
     page.get_by_role("dialog", name="Votre arbre de famille").wait_for()
-    page.locator(".arbre canvas").wait_for()
+    page.locator(".arbre svg.plan .personne, .arbre canvas").first.wait_for()
     page.get_by_role("button", name="Liste").click()
     panneau = page.locator(".panneau")
     noms = panneau.locator("button > span:first-child").all_inner_texts()
@@ -414,4 +429,10 @@ def test_022_arbre_de_l_invite_et_proposition(page):
     carte.get_by_label("La bonne date").fill("2016-05-02")
     carte.get_by_role("button", name="Envoyer à Julien").click()
     carte.get_by_text("Merci, c'est transmis à Julien").wait_for()
+    # « Lien avec… » aussi pour l'invité, sans les personnes non montrées
+    page.get_by_role("button", name="Lien avec…").click()
+    choix = page.locator(".panneau button > span:first-child").all_inner_texts()
+    assert "Personne non montrée" not in choix
+    page.locator(".panneau").get_by_role("button", name=re.compile("^Hugo")).click()
+    page.locator(".resultat").get_by_text("de Léa", exact=False).wait_for()
     sans_debordement(page)

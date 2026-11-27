@@ -1,42 +1,79 @@
 <script>
-  // 0.22 : l'arbre de famille en 3D, en plein écran, par-dessus le chemin. Deux vues (constellation, hélice), la dernière
-  // gardée sur l'appareil. Toucher un visage : la caméra va vers lui et sa carte s'ouvre.
-  // Propriétaire : « Voir son sillage », « Ouvrir dans carnet » (ou Treemich). Invité : « Proposer une correction »
-  // (envoyée à carnet par Sillage ; rien n'est écrit tout de suite). La scène 3D (three.js) n'est chargée qu'ici.
+  // L'arbre de famille, en plein écran par-dessus le chemin (0.22). 0.23 : cinq vues validées par Julien le 27/11/2026
+  // — à plat : Éventail, Sablier, Arbre (complet) ; en 3D : Arbre de vie, Hélice (la constellation est retirée) — et le
+  // champ « Lien avec… » : une deuxième personne, le lien en clair, le chemin qui s'allume sur l'arbre (par le sang
+  // d'abord, sinon par les couples), les étapes écrites dessous.
+  // Toucher une personne : elle passe au centre et sa carte s'ouvre. Propriétaire : « Voir son sillage », « Ouvrir dans
+  // carnet » (ou Treemich). Invité : « Proposer une correction » (envoyée à carnet par Sillage).
+  // three.js n'est chargé qu'à l'ouverture d'une vue 3D.
   import { onMount, onDestroy, tick } from 'svelte'
   import Croix from '$lib/Croix.svelte'
   import { dateLongue } from '$lib/dates.js'
   import { indexer, parente } from '$lib/arbre/parente.js'
+  import { chemin as cheminEntre, famille, motEtape, nomDe, prenomNom, surlignage } from '$lib/arbre/famille.js'
+  import { creerVues2D } from '$lib/arbre/vues2d.js'
 
   let { arbre, invite = null, apercu = false, restantes = 0, onfermer } = $props()
   // invite : { jeton } pour un invité ; null pour le propriétaire
 
+  const VUES = [
+    { cle: 'eventail', nom: 'Éventail', plat: true },
+    { cle: 'sablier', nom: 'Sablier', plat: true },
+    { cle: 'complet', nom: 'Arbre', plat: true },
+    { cle: 'vie', nom: 'Vie 3D', plat: false },
+    { cle: 'helice', nom: 'Hélice', plat: false },
+  ]
   const CLE_VUE = 'sillage-arbre-vue'
-  const CLE_AIDE = 'sillage-arbre-aide'
+  const CLE_AIDE = 'sillage-arbre-aide-2'
   const lireStock = (k) => { try { return localStorage.getItem(k) } catch { return null } }
   const ecrireStock = (k, v) => { try { localStorage.setItem(k, v) } catch { /* navigation privée */ } }
 
+  // Les visages passent par Sillage (identifiants opaques pour un invité)
+  const donnees = {
+    depart: arbre.depart, liens: arbre.liens,
+    personnes: arbre.personnes.map((p) => ({ ...p, visage: !p.visage ? null
+      : invite ? `/api/invite/${encodeURIComponent(invite.jeton)}/arbre/vignette/${p.id}` : `/api/arbre/vignette/${p.visage}` })),
+  }
+  const fam = famille(donnees)
+  const ix = indexer(arbre.personnes, arbre.liens)
+  const parId = new Map(arbre.personnes.map((p) => [p.id, p]))
+
+  let svgEl = $state(null)
   let boite = $state(null)
-  let scene = null
-  let vue = $state(lireStock(CLE_VUE) === 'helice' ? 'helice' : 'constellation')
+  let moteur = null                         // vues à plat, arbre de vie ou hélice
+  let vue = $state(VUES.some((v) => v.cle === lireStock(CLE_VUE)) ? lireStock(CLE_VUE) : 'eventail')
+  let avec3d = $state(true)
+  let centre = $state(arbre.depart)         // la personne au centre de la vue
+  let reference = $state(arbre.depart)      // d'où se lisent les liens des cartes (la personne de départ, ou l'invité choisi)
   let choisie = $state(null)
   let aide = $state(lireStock(CLE_AIDE) !== 'vu')
   let pret = $state(false)
-  let sans3d = $state(false)
   let perdu = $state(false)
-  let centre = $state(arbre.depart)          // invités : la personne d'où se lisent les liens (légende)
-  let formulaire = $state(null)              // invité : la proposition en cours
+  let dessines = $state(new Set())
+  let formulaire = $state(null)
   let envoi = $state({ attente: false, message: '', erreur: '' })
   let reste = $state(restantes)
-  let liste = $state(false)                  // la liste des personnes (accessible sans la 3D, et pour chercher)
+  let panneau = $state(null)                // 'liste' | 'lien' | null
   let cherche = $state('')
+  let cible = $state(null)                  // « Lien avec… » : la deuxième personne
 
-  const ix = $derived(indexer(arbre.personnes, arbre.liens))
-  const parId = $derived(new Map(arbre.personnes.map((p) => [p.id, p])))
-  const nomDe = (p) => (p?.statut === 'masque' ? 'Personne non montrée' : p?.nom || 'Sans nom')
+  const plat = $derived(VUES.find((v) => v.cle === vue)?.plat)
   const titre = $derived(invite ? 'Votre arbre de famille' : `L'arbre de ${nomDe(parId.get(arbre.depart))}`)
-  const lien = $derived(choisie ? parente(ix, centre, choisie.id) : '')
-  const deCentre = $derived(nomDe(parId.get(centre)).split(' ')[0])
+  const lien = $derived(choisie ? parente(ix, reference, choisie.id) : '')
+  const prenomDe = (id) => prenomNom(parId.get(id))[0]
+  const ch = $derived(cible ? cheminEntre(fam, centre, cible) : null)
+  const sur = $derived(surlignage(ch))
+  const resume = $derived.by(() => {
+    if (!cible) return null
+    if (!ch) return { phrase: `${prenomDe(cible)} et ${prenomDe(centre)} ne sont pas reliés dans l'arbre.`, etapes: [] }
+    const mot = parente(ix, centre, cible)
+    return {
+      phrase: mot === 'Par alliance' ? `${nomDe(parId.get(cible))} est de la famille de ${prenomDe(centre)} par alliance`
+        : `${nomDe(parId.get(cible))} : ${mot.toLowerCase()} de ${prenomDe(centre)}${ch.alliance && !/^(Belle|Beau|Gendre|Ex-|Conjoint)/.test(mot) ? ' (par alliance)' : ''}`,
+      etapes: ch.etapes.map((e, i) => (i ? motEtape(fam, e, ch.etapes[i - 1].id) : prenomDe(e.id))),
+      incomplet: ![...sur.ids].every((id) => dessines.has(id)),
+    }
+  })
 
   // « 1985 » → « Né en 1985 » ; « 1985-03-14 » → « Née le 14 mars 1985 »
   function dates(p) {
@@ -46,29 +83,89 @@
     const d = p.deces === 'inconnue' ? `décédé${e}` : p.deces ? (p.deces.length >= 10 ? `décès le ${dateLongue(p.deces.slice(0, 10))}` : `décès en ${p.deces.slice(0, 4)}`) : ''
     return [n, d].filter(Boolean).join(' · ') || (p.statut === 'mineur' || p.statut === 'inconnu' ? '' : 'Dates inconnues')
   }
+  const conjointsDe = (id) => fam.conjoints(id).map((x) => parId.get(x)).filter(Boolean)
 
-  const conjointsDe = (id) => [...(ix.conjoints.get(id) || [])].map((x) => parId.get(x)).filter(Boolean)
+  // ---------------------------------------------------------------- moteurs de dessin
+  function demonter() { moteur?.m.detruire(); moteur = null }
+  async function monter() {
+    demonter()
+    pret = false
+    await tick()
+    if (plat) {
+      moteur = { sorte: 'plat', m: creerVues2D(svgEl, fam, { surChoix: choisir }) }
+      dessiner()
+      pret = true
+      return
+    }
+    const quoi = vue
+    const { webglPossible } = await import('$lib/arbre/scene.js')
+    if (!webglPossible()) { avec3d = false; vue = 'eventail'; return monter() }
+    const module = quoi === 'vie' ? await import('$lib/arbre/vie.js') : await import('$lib/arbre/scene.js')
+    if (quoi !== vue) return
+    try {
+      if (quoi === 'vie') {
+        moteur = { sorte: 'vie', m: module.creerVie(boite, fam, { lienDe: (id) => (id === centre ? '' : parente(ix, centre, id)), surChoix: surChoix3d }) }
+      } else {
+        moteur = { sorte: 'helice', m: module.creerScene(boite, donnees, { surChoix: (p, q) => surChoix3d(p?.id ?? null, q) }) }
+      }
+      dessiner()
+      pret = true
+    } catch { avec3d = false; vue = 'eventail'; monter() }
+  }
+  function dessiner(garderCadre = false) {
+    if (!moteur) return
+    if (moteur.sorte === 'plat') dessines = moteur.m.dessiner(vue, centre, sur, garderCadre)
+    else if (moteur.sorte === 'vie') dessines = moteur.m.montrer(centre, sur)
+    else { moteur.m.surligner(sur); dessines = new Set(arbre.personnes.map((p) => p.id)) }
+  }
+  function surChoix3d(id, quoi) {
+    if (quoi === 'perdu') { perdu = true; return }
+    if (id) choisir(id)
+    else fermerCarte()
+  }
 
+  // ---------------------------------------------------------------- actions
+  function choisir(id) {
+    const p = parId.get(id)
+    if (!p) return
+    choisie = p
+    formulaire = null
+    envoi = { attente: false, message: '', erreur: '' }
+    fermerAide()
+    if (moteur?.sorte === 'helice') { moteur.m.choisir(id); return }
+    if (id !== centre) { centre = id; dessiner() }
+  }
   function basculer(v) {
     if (v === vue) return
     vue = v
     choisie = null
     formulaire = null
     ecrireStock(CLE_VUE, v)
-    scene?.basculer(v)
+    monter()
   }
   function fermerAide() { aide = false; ecrireStock(CLE_AIDE, 'vu') }
-  function fermerCarte() { choisie = null; formulaire = null; scene?.relacher() }
-  function recentrer(id) { centre = id; scene?.choisir(id) }
+  function fermerCarte() { choisie = null; formulaire = null; if (moteur?.sorte === 'helice') moteur.m.relacher() }
+  function revenir() { centre = reference; choisie = null; dessiner() }
+  function recentrer(id) { reference = id; centre = id; choisie = null; dessiner(); if (moteur?.sorte === 'helice') moteur.m.choisir(id) }
+  function ouvrirPanneau(quoi) { panneau = panneau === quoi ? null : quoi; cherche = '' }
   function depuisListe(p) {
-    if (matchMedia('(max-width: 640px)').matches) liste = false
-    fermerAide()
-    scene?.choisir(p.id)
-    choisie = p
+    if (matchMedia('(max-width: 640px)').matches) panneau = null
+    choisir(p.id)
   }
+  async function lienAvec(p) {
+    cible = p.id
+    panneau = null
+    choisie = null
+    await tick()
+    dessiner(true)
+  }
+  async function effacerLien() { cible = null; await tick(); dessiner(true) }
+  function voirComplet() { vue = 'complet'; ecrireStock(CLE_VUE, 'complet'); monter() }
+
   const trouves = $derived.by(() => {
     const t = cherche.trim().toLowerCase()
-    return [...arbre.personnes].filter((p) => !t || nomDe(p).toLowerCase().includes(t))
+    return [...arbre.personnes]
+      .filter((p) => (panneau !== 'lien' || (p.id !== centre && p.statut !== 'masque')) && (!t || nomDe(p).toLowerCase().includes(t)))
       .sort((a, b) => a.generation - b.generation || nomDe(a).localeCompare(nomDe(b)))
   })
 
@@ -97,116 +194,102 @@
     } catch (e) { envoi = { attente: false, message: '', erreur: e.message } }
   }
 
-  // Liste de secours (sans WebGL) : les personnes par génération, du plus ancien au plus jeune
-  const parGeneration = $derived.by(() => {
-    const m = new Map()
-    for (const p of arbre.personnes) (m.get(p.generation) || m.set(p.generation, []).get(p.generation)).push(p)
-    return [...m.entries()].sort((a, b) => a[0] - b[0])
-  })
-
   const surTouche = (ev) => {
     if (ev.key !== 'Escape') return
     if (formulaire) formulaire = null
+    else if (panneau) panneau = null
     else if (choisie) fermerCarte()
+    else if (cible) effacerLien()
     else onfermer?.()
   }
 
-  onMount(async () => {
-    document.documentElement.style.overflow = 'hidden'
-    const module = await import('$lib/arbre/scene.js')
-    if (!module.webglPossible()) { sans3d = true; return }
-    await tick()
-    const donnees = {
-      depart: arbre.depart, liens: arbre.liens,
-      personnes: arbre.personnes.map((p) => ({ ...p, visage: !p.visage ? null
-        : invite ? `/api/invite/${encodeURIComponent(invite.jeton)}/arbre/vignette/${p.id}` : `/api/arbre/vignette/${p.visage}` })),
-    }
-    try {
-      scene = module.creerScene(boite, donnees, {
-        vue,
-        surChoix: (p, quoi) => {
-          if (quoi === 'perdu') { perdu = true; return }
-          choisie = p ? parId.get(p.id) : null
-          formulaire = null
-          envoi = { attente: false, message: '', erreur: '' }
-          if (p) fermerAide()
-        },
-      })
-      pret = true
-    } catch { sans3d = true }
-  })
-  onDestroy(() => { scene?.detruire(); document.documentElement.style.overflow = '' })
+  onMount(() => { document.documentElement.style.overflow = 'hidden'; monter() })
+  onDestroy(() => { demonter(); document.documentElement.style.overflow = '' })
 </script>
 
 <svelte:window onkeydown={surTouche} />
 
 <div class="arbre" role="dialog" aria-modal="true" aria-label={titre}>
-  <div class="scene" bind:this={boite} aria-hidden="true"></div>
+  {#if plat}
+    <svg class="plan" bind:this={svgEl} aria-label="Arbre de famille" xmlns="http://www.w3.org/2000/svg"></svg>
+  {:else}
+    <div class="scene" bind:this={boite} aria-hidden="true"></div>
+  {/if}
 
   <header class="haut">
     <div class="verre titre-arbre">
       <span class="etiquette">Arbre</span>
       <span class="nom">{titre}</span>
     </div>
-    {#if !sans3d}
-      <div class="verre bascule" role="group" aria-label="Vue de l'arbre">
-        <button type="button" aria-pressed={vue === 'constellation'} onclick={() => basculer('constellation')}>Constellation</button>
-        <button type="button" aria-pressed={vue === 'helice'} onclick={() => basculer('helice')}>Hélice</button>
-      </div>
-      <div class="verre bascule"><button type="button" aria-pressed={liste} onclick={() => (liste = !liste)}>Liste</button></div>
-    {/if}
+    <div class="verre vues" role="group" aria-label="Vue de l'arbre">
+      {#each VUES.filter((v) => v.plat || avec3d) as v (v.cle)}
+        <button type="button" aria-pressed={vue === v.cle} onclick={() => basculer(v.cle)}>{v.nom}</button>
+      {/each}
+    </div>
+    <div class="outils">
+      <div class="verre bascule"><button type="button" aria-pressed={panneau === 'lien'} onclick={() => ouvrirPanneau('lien')}>Lien avec…</button></div>
+      <div class="verre bascule"><button type="button" aria-pressed={panneau === 'liste'} onclick={() => ouvrirPanneau('liste')}>Liste</button></div>
+      {#if centre !== reference && vue !== 'helice'}
+        <div class="verre bascule"><button type="button" onclick={revenir}>Revenir à {prenomDe(reference)}</button></div>
+      {/if}
+    </div>
   </header>
   <Croix label="Fermer l'arbre" onclick={() => onfermer?.()} />
 
-  {#if invite && arbre.invites?.length > 1 && !sans3d}
+  {#if invite && arbre.invites?.length > 1}
     <ul class="verre legende" aria-label="Lire les liens depuis">
       {#each arbre.invites as i}
-        <li><button type="button" aria-pressed={centre === i.id} onclick={() => recentrer(i.id)}>{i.prenom || 'Invité'}</button></li>
+        <li><button type="button" aria-pressed={reference === i.id} onclick={() => recentrer(i.id)}>{i.prenom || 'Invité'}</button></li>
       {/each}
-      <li><button type="button" onclick={() => { centre = arbre.depart; fermerCarte(); scene?.recadrer() }}>Ensemble</button></li>
     </ul>
   {/if}
 
   {#if perdu}
-    <p class="verre message" role="alert">L'affichage 3D s'est arrêté. Fermez l'arbre et rouvrez-le.</p>
-  {:else if sans3d}
-    <div class="secours">
-      <p class="discret">Cet appareil n'affiche pas la 3D : voici l'arbre en liste, du plus ancien au plus jeune.</p>
-      {#each parGeneration as [g, gens]}
-        <section>
-          <h2 class="etiquette">Génération {g + 1}</h2>
-          <ul>
-            {#each gens as p}<li><strong>{nomDe(p)}</strong>{#if parente(ix, centre, p.id)}<span class="discret"> · {parente(ix, centre, p.id)}</span>{/if}{#if dates(p)}<span class="discret"> · {dates(p)}</span>{/if}</li>{/each}
-          </ul>
-        </section>
-      {/each}
-    </div>
+    <p class="verre message" role="alert">L'affichage 3D s'est arrêté. Choisissez une vue à plat, ou fermez l'arbre et rouvrez-le.</p>
   {:else if !pret}
     <p class="verre message" role="status">Préparation de l'arbre…</p>
   {:else if aide}
     <div class="verre aide" role="note">
-      <p><strong>Touchez un visage</strong> pour voir qui c'est.</p>
-      <p class="discret">Glissez pour tourner, pincez pour zoomer.</p>
+      <p><strong>Touchez une personne</strong> pour la mettre au centre.</p>
+      <p class="discret">Glissez pour vous déplacer, pincez pour zoomer. « Lien avec… » montre comment deux personnes sont parentes.</p>
       <button type="button" class="plein" onclick={fermerAide}>Compris</button>
     </div>
   {/if}
 
-  {#if liste && !sans3d}
-    <nav class="verre panneau" aria-label="Personnes de l'arbre">
+  {#if panneau}
+    <nav class="verre panneau" aria-label={panneau === 'lien' ? `Lien de ${prenomDe(centre)} avec…` : "Personnes de l'arbre"}>
+      {#if panneau === 'lien'}<p class="discret petit-titre">Quel lien entre <strong>{prenomDe(centre)}</strong> et…</p>{/if}
       <input type="search" bind:value={cherche} placeholder="Chercher un nom" aria-label="Chercher un nom" autocomplete="off" />
       <ul>
         {#each trouves as p (p.id)}
-          <li><button type="button" aria-current={choisie?.id === p.id ? 'true' : undefined} onclick={() => depuisListe(p)}>
-            <span>{nomDe(p)}</span><span class="discret">{parente(ix, centre, p.id)}</span></button></li>
+          <li><button type="button" aria-current={(panneau === 'lien' ? cible : choisie?.id) === p.id ? 'true' : undefined}
+                      onclick={() => (panneau === 'lien' ? lienAvec(p) : depuisListe(p))}>
+            <span>{nomDe(p)}</span><span class="discret">{parente(ix, reference, p.id)}</span></button></li>
         {/each}
       </ul>
     </nav>
   {/if}
 
+  {#if resume}
+    <section class="verre resultat" aria-label="Lien de parenté" aria-live="polite">
+      <button type="button" class="fermer" aria-label="Effacer le lien" onclick={effacerLien}>×</button>
+      <p class="phrase">{resume.phrase}</p>
+      {#if resume.etapes.length}
+        <ol class="etapes">
+          {#each resume.etapes as e, i}<li>{#if i}<span class="fleche" aria-hidden="true">→</span>{/if}{e}</li>{/each}
+        </ol>
+      {/if}
+      {#if resume.incomplet && vue !== 'complet'}
+        <p class="discret petit">Une partie du chemin n'est pas dans cette vue.
+          <button type="button" class="lien-texte" onclick={voirComplet}>Voir dans l'arbre complet</button></p>
+      {/if}
+    </section>
+  {/if}
+
   {#if choisie}
     <section class="verre carte" aria-label={nomDe(choisie)}>
       <button type="button" class="fermer" aria-label="Fermer la carte" onclick={fermerCarte}>×</button>
-      {#if lien}<p class="lien">{lien}{choisie.id !== centre ? ` de ${deCentre}` : ''}</p>{/if}
+      {#if lien}<p class="lien">{lien}{choisie.id !== reference ? ` de ${prenomDe(reference)}` : ''}</p>{/if}
       <h2 class="nom-carte">{nomDe(choisie)}</h2>
       {#if dates(choisie)}<p class="discret">{dates(choisie)}</p>{/if}
 
@@ -284,30 +367,45 @@
       {/if}
     </section>
   {/if}
+
+  {#if plat}
+    <p class="legende-traits" aria-hidden="true"><span><i></i>Parents et enfants</span><span><i class="c"></i>Couple</span><span><i class="x"></i>Ex-couple</span><span>Gris : décédé</span></p>
+  {/if}
 </div>
 
 <style>
   .arbre { position: fixed; inset: 0; z-index: 60; background: #0b0910; color: var(--foreground); }
-  .scene { position: absolute; inset: 0; }
+  .scene, .plan { position: absolute; inset: 0; width: 100%; height: 100%; }
+  .plan { touch-action: none; cursor: grab; }
+  .plan :global(text) { font-family: Inter, system-ui, sans-serif; pointer-events: none; }
+  .plan :global(.personne) { cursor: pointer; }
   .scene :global(canvas) { display: block; }
-  .verre { background: rgb(24 20 38 / 0.82); border: 1px solid rgb(201 209 220 / 0.14); border-radius: 1rem;
+  .verre { background: rgb(24 20 38 / 0.86); border: 1px solid rgb(201 209 220 / 0.14); border-radius: 1rem;
            backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: 0 10px 40px rgb(0 0 0 / 0.45); }
   .haut { position: absolute; z-index: 61; top: calc(0.75rem + env(safe-area-inset-top, 0px)); left: max(0.75rem, env(safe-area-inset-left, 0px));
           right: calc(4.25rem + env(safe-area-inset-right, 0px)); display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; pointer-events: none; }
   .haut > * { pointer-events: auto; }
   .titre-arbre { display: grid; padding: 0.45rem 0.9rem; min-width: 0; max-width: 100%; }
   .titre-arbre .nom { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vues { display: flex; gap: 0.2rem; padding: 0.25rem; max-width: 100%; overflow-x: auto; }
+  .outils { display: flex; gap: 0.5rem; flex-wrap: wrap; }
   .bascule, .legende { display: flex; gap: 0.25rem; padding: 0.25rem; }
-  .bascule button, .legende button { min-height: 2.5rem; padding: 0 0.9rem; border-radius: 0.75rem; border: 0; background: transparent;
-                                     color: var(--foreground); font: inherit; font-size: 0.9rem; cursor: pointer; }
-  .bascule button[aria-pressed='true'], .legende button[aria-pressed='true'] { background: var(--app); color: var(--app-contraste); font-weight: 600; }
-  .legende { position: absolute; z-index: 61; left: max(0.75rem, env(safe-area-inset-left, 0px)); bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
+  .vues button, .bascule button, .legende button { min-height: 2.5rem; padding: 0 0.8rem; border-radius: 0.75rem; border: 0; background: transparent;
+                                     color: var(--foreground); font: inherit; font-size: 0.88rem; cursor: pointer; white-space: nowrap; }
+  .vues button[aria-pressed='true'], .bascule button[aria-pressed='true'], .legende button[aria-pressed='true'] { background: var(--app); color: var(--app-contraste); font-weight: 600; }
+  .legende { position: absolute; z-index: 61; right: max(0.75rem, env(safe-area-inset-right, 0px)); bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
              list-style: none; margin: 0; flex-wrap: wrap; max-width: calc(100vw - 1.5rem); }
   .message, .aide { position: absolute; z-index: 61; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 1rem 1.2rem;
                     width: min(22rem, calc(100vw - 2rem)); text-align: center; }
   .aide p { margin: 0 0 0.5rem; }
   .carte { position: absolute; z-index: 62; right: max(0.75rem, env(safe-area-inset-right, 0px)); bottom: calc(0.75rem + env(safe-area-inset-bottom, 0px));
-           width: min(22rem, calc(100vw - 1.5rem)); max-height: calc(100dvh - 7rem); overflow-y: auto; padding: 1rem 1.1rem; }
+           width: min(22rem, calc(100vw - 1.5rem)); max-height: calc(100dvh - 9rem); overflow-y: auto; padding: 1rem 1.1rem; }
+  .resultat { position: absolute; z-index: 62; left: max(0.75rem, env(safe-area-inset-left, 0px)); bottom: calc(2.6rem + env(safe-area-inset-bottom, 0px));
+              width: min(30rem, calc(100vw - 1.5rem)); padding: 0.9rem 1.1rem; }
+  .phrase { margin: 0; padding-right: 2.2rem; font-weight: 600; color: var(--app); }
+  .etapes { list-style: none; margin: 0.45rem 0 0; padding: 0; display: flex; flex-wrap: wrap; gap: 0.2rem 0.35rem; font-size: 0.88rem; }
+  .fleche { color: var(--muted-foreground); margin-right: 0.35rem; }
+  .lien-texte { background: none; border: 0; padding: 0; color: var(--app); font: inherit; text-decoration: underline; cursor: pointer; min-height: 2.75rem; }
   .fermer { position: absolute; top: 0.4rem; right: 0.5rem; width: 2.75rem; height: 2.75rem; border: 0; background: none;
             color: var(--muted-foreground); font-size: 1.4rem; cursor: pointer; }
   .lien { margin: 0; padding-right: 2.5rem; font-size: 0.75rem; letter-spacing: 0.06em; text-transform: uppercase; color: var(--app); }
@@ -327,9 +425,10 @@
   .formulaire label { display: grid; gap: 0.25rem; font-size: 0.88rem; }
   .formulaire input, .formulaire select, .formulaire textarea { font: inherit; font-size: 16px; color: var(--foreground); background: rgb(0 0 0 / 0.35);
              border: 1px solid rgb(201 209 220 / 0.2); border-radius: 0.6rem; padding: 0.55rem 0.7rem; min-height: 2.75rem; width: 100%; }
-  .panneau { position: absolute; z-index: 61; left: max(0.75rem, env(safe-area-inset-left, 0px)); top: calc(4.5rem + env(safe-area-inset-top, 0px));
+  .panneau { position: absolute; z-index: 63; left: max(0.75rem, env(safe-area-inset-left, 0px)); top: calc(8.5rem + env(safe-area-inset-top, 0px));
              bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px)); width: min(19rem, calc(100vw - 1.5rem)); display: grid;
-             grid-template-rows: auto 1fr; gap: 0.5rem; padding: 0.6rem; }
+             grid-template-rows: auto auto 1fr; gap: 0.5rem; padding: 0.6rem; }
+  .petit-titre { margin: 0.1rem 0.3rem 0; font-size: 0.85rem; }
   .panneau input { font: inherit; font-size: 16px; color: var(--foreground); background: rgb(0 0 0 / 0.35); border: 1px solid rgb(201 209 220 / 0.2);
                    border-radius: 0.6rem; padding: 0.5rem 0.7rem; min-height: 2.75rem; }
   .panneau ul { margin: 0; padding: 0; list-style: none; overflow-y: auto; }
@@ -337,10 +436,15 @@
                     border-radius: 0.6rem; background: transparent; color: var(--foreground); font: inherit; font-size: 0.9rem; cursor: pointer; }
   .panneau button span:last-child { font-size: 0.78rem; }
   .panneau button:hover, .panneau button[aria-current='true'] { background: rgb(169 143 216 / 0.18); }
-  .secours { position: absolute; inset: 0; overflow-y: auto; padding: calc(5rem + env(safe-area-inset-top, 0px)) 1rem 2rem; max-width: 40rem; margin: 0 auto; }
-  .secours ul { margin: 0.3rem 0 1rem; padding: 0; list-style: none; display: grid; gap: 0.3rem; }
+  .legende-traits { position: absolute; z-index: 60; left: max(0.75rem, env(safe-area-inset-left, 0px)); bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px));
+                    margin: 0; display: flex; gap: 0.8rem; flex-wrap: wrap; font-size: 0.72rem; color: var(--muted-foreground); pointer-events: none; }
+  .legende-traits span { display: inline-flex; align-items: center; gap: 0.35rem; }
+  .legende-traits i { display: inline-block; width: 1.1rem; border-top: 2px solid var(--app); }
+  .legende-traits i.c { border-color: #c9d1dc; }
+  .legende-traits i.x { border-top-style: dashed; border-color: #c9d1dc; }
   @media (max-width: 640px) {
-    .carte { bottom: auto; top: calc(8.5rem + env(safe-area-inset-top, 0px)); max-height: calc(100dvh - 9.5rem); }
-    .panneau { top: calc(8.5rem + env(safe-area-inset-top, 0px)); }
+    .carte { bottom: auto; top: calc(11.5rem + env(safe-area-inset-top, 0px)); max-height: calc(100dvh - 15rem); }
+    .panneau { top: calc(11.5rem + env(safe-area-inset-top, 0px)); }
+    .vues button { padding: 0 0.6rem; font-size: 0.82rem; }
   }
 </style>

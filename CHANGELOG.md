@@ -1,5 +1,12 @@
 # Journal des versions
 
+## 0.23.0 — 27 novembre 2026 (nouvelles vues de l'arbre, « Lien avec… »)
+
+- **Constellation retirée** (illisible selon Julien). **Cinq vues**, choisies par Julien sur deux prototypes : à plat **Éventail** (ancêtres en demi-cercles, famille proche dessous), **Sablier** (ancêtres au-dessus, enfants dessous, frères et sœurs à gauche, conjoint à droite), **Arbre** (tout l'arbre, une génération par rangée, couples reliés) ; en 3D **Vie 3D** (arbre de vie : un étage par génération nommé « ↑ Parents », « ↓ Enfants »…, rotation autour de l'axe vertical seulement, sève lumineuse qui descend des parents vers les enfants, lien écrit sur chaque carte) et **Hélice** (gardée pour l'instant). Éventail par défaut ; dernière vue gardée sur l'appareil. Les vues à plat marchent sans WebGL.
+- **Toucher une personne** la met au centre et ouvre sa carte ; « Revenir à … » ramène la personne de départ.
+- **« Lien avec… »** (propriétaire et invités ; un invité ne choisit que parmi les personnes qu'il voit) : le lien en clair (« Léa MARCHAND : fille de Hugo »), les étapes (« Hugo → sa fille Léa ») et le chemin qui s'allume sur l'arbre, le reste estompé ; par le sang d'abord, sinon par les couples (« par alliance ») ; « Voir dans l'arbre complet » si une partie du chemin n'est pas dans la vue.
+- `lib/arbre/famille.js` (famille, `chemin`, `motEtape`, `surlignage`), `lib/arbre/vues2d.js` (vues à plat en SVG, glisser, pincer, molette), `lib/arbre/vie.js` (arbre de vie, three.js), `lib/arbre/scene.js` (hélice seule, `surligner`). Serveur inchangé. Tests d'écran `test_022_*` revus. Jamais essayé sur la vraie installation.
+
 ## 0.22.0 — 27 novembre 2026 (arbre de famille en 3D)
 
 - **Arbre de famille** (demande de Julien du 27/11/2026, grill, conseil et prototype mesuré sur iPhone : 60 i/s à 400 personnes) : bouton « Arbre » sur le chemin d'une personne qui a au moins un lien dans Treemich ; tout l'arbre relié, en **constellation** ou en **hélice** (ancêtres en haut), bascule animée, dernière vue gardée sur l'appareil, rotation lente au repos (coupée si l'appareil réduit les animations), visages lointains en points lumineux, décédés en noir et blanc, ex-conjoints en pointillé, liste des personnes avec recherche, liste de secours sans WebGL. Couleurs : lavande et argent (l'or reste à l'Anneau).
