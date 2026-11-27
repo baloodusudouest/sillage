@@ -72,14 +72,21 @@ export function chemin(fam, a, b) {
     const etapes = []
     for (let x = b; x !== a; x = avant.get(x)[0]) etapes.unshift({ id: x, rel: avant.get(x)[1] })
     etapes.unshift({ id: a, rel: null })
-    // « sa mère, puis son fils » vers un enfant de ce parent = « son frère » (même parent) ;
+    // 0.23.2 (demande de Julien) : on remonte toujours par les parents, jamais « son frère » d'un coup :
+    // un frère ou une sœur devient « sa mère, puis sa fille » quand l'arbre connaît un parent commun.
+    for (let i = 1; i < etapes.length; i++) {
+      if (etapes[i].rel !== 'frere') continue
+      const de = etapes[i - 1].id, vers = etapes[i].id
+      const communs = fam.parents(de).filter((p) => fam.parents(vers).includes(p))
+      if (!communs.length) continue                       // lien « fratrie » seul dans Treemich : on le garde
+      const p = communs.find((x) => fam.P.get(x)?.genre === 'femme') || communs[0]
+      etapes.splice(i, 1, { id: p, rel: 'parent' }, { id: vers, rel: 'enfant' }); i++
+    }
     // 0.23.1 : « sa fille, puis son père » quand ce père est son conjoint = « son conjoint » (on ne passe pas par l'enfant)
     let parAlliance = alliance
     for (let i = 1; i + 1 < etapes.length; i++) {
       const avantId = etapes[i - 1].id, apres = etapes[i + 1]
-      if (etapes[i].rel === 'parent' && apres.rel === 'enfant' && fam.fratrie(avantId).includes(apres.id)) {
-        etapes.splice(i, 2, { id: apres.id, rel: 'frere' }); i--
-      } else if (etapes[i].rel === 'enfant' && apres.rel === 'parent' && fam.conjoints(avantId).includes(apres.id)) {
+      if (etapes[i].rel === 'enfant' && apres.rel === 'parent' && fam.conjoints(avantId).includes(apres.id)) {
         etapes.splice(i, 2, { id: apres.id, rel: 'conjoint' }); parAlliance = true; i--
       }
     }

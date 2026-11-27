@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 0.23.2 — 27 novembre 2026 (« Lien avec… » : on remonte par les parents)
+
+- **Les étapes passent par les parents** (demande de Julien, 27/11/2026) : plus de « son frère » ou « sa sœur » d'un coup ; « son père Octave → sa mère Inès → sa fille Henri » quand l'arbre connaît un parent commun (la mère d'abord). Un frère ou une sœur reliés seulement par un lien « fratrie » dans Treemich restent tels quels. Le schéma montre donc le parent commun.
+- Schéma : après un conjoint, la montée vers ses parents ne se décale plus d'une colonne de trop.
+- Interface seulement (`lib/arbre/famille.js`, `lib/arbre/vues2d.js`). Jamais essayé sur la vraie installation.
+
 ## 0.23.1 — 27 novembre 2026 (« Lien avec… » : tout le chemin)
 
 - **Le chemin entier, de la personne au centre jusqu'à la personne cherchée** (remarque de Julien, 27/11/2026 : on ne voyait que la montée jusqu'à l'ancêtre commun). En **éventail, sablier et arbre de vie**, « Lien avec… » ouvre un **schéma de parenté** : on remonte de la personne au centre jusqu'à l'ancêtre commun (colonne de gauche), puis on redescend jusqu'à la personne cherchée (colonne de droite) ; frère, sœur ou conjoint décalent d'une colonne ; sous chaque carte, son lien avec la personne au centre. Liens « Le voir dans l'arbre complet » et « Revenir à la vue ». Dans l'**arbre complet**, la vue se cadre sur tout le chemin ; les frères et sœurs du chemin s'allument jusqu'à leurs parents communs.

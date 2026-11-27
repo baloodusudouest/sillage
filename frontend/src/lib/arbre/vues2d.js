@@ -201,7 +201,7 @@ export function creerVues2D(svg, fam, { surChoix = () => {} } = {}) {
     let x = 0, y = 0, monte = false
     ch.etapes.forEach((e, i) => {
       if (i) {
-        if (e.rel === 'parent') { if (!monte && pos.length > 1 && ch.etapes[i - 1].rel !== 'parent' && ch.etapes[i - 1].rel !== null) x += 1; y -= 1; monte = true }
+        if (e.rel === 'parent') { if (!monte && pos.length > 1 && !['parent', 'conjoint', null].includes(ch.etapes[i - 1].rel)) x += 1; y -= 1; monte = true }
         else if (e.rel === 'enfant') { if (monte) { x += 1; monte = false } y += 1 }
         else { x += 1; monte = false }
       }
