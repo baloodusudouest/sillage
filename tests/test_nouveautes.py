@@ -183,3 +183,58 @@ def test_photo_entree_tard_dans_le_sillage(monde, monkeypatch):
     p = client.get("/api/nouveautes").json()["personnes"]
     assert len(p) == 1 and p[0]["etapes"][0]["photos"] == 1 and p[0]["etapes"][0]["retrouvee"] is True
     assert len(client.get(f"/api/chemin/{CAMILLE}").json()["nouvelles"]) == 1
+
+
+def _sejours_notes() -> list[tuple[str, str, str]]:
+    with main.ETAT["base"]._verrou:
+        return [tuple(l) for l in main.ETAT["base"]._c.execute("SELECT personne, du, fin FROM sejours ORDER BY du")]
+
+
+def test_sejour_annule_n_est_plus_note(monde):
+    """0.26.7 : chambre libérée par Home Assistant avant l'arrivée (séjour annulé) : l'invitation part de l'onglet
+    Chambres et le séjour n'est plus noté (« Du nouveau depuis » ne part pas d'un séjour qui n'a pas eu lieu)."""
+    client, faux = monde
+    _anciennes(faux)
+    h = avec_jeton_ha()
+    du, fin = _jour(-5), _jour(-7)                                   # dans 5 jours, jusqu'à dans 7 jours
+    sejour(client, h, noms=["Camille ROUSSEL"], du=du, jusqu_au=fin)
+    assert _sejours_notes() == [(CAMILLE, du, fin)]
+    _entrer(client)
+    assert [c["chambre"] for c in client.get("/api/chambres").json()["chambres"]] == ["ami"]
+    sejour(client, h, noms=[])                                       # annulé dans Home Assistant
+    assert client.get("/api/chambres").json()["chambres"] == []
+    assert _sejours_notes() == []
+
+
+def test_sejour_annule_le_jour_d_arrivee(monde):
+    """Le jour d'arrivée compte comme pas commencé (comme dans Gazette 0.24.1)."""
+    client, faux = monde
+    _anciennes(faux)
+    h = avec_jeton_ha()
+    sejour(client, h, noms=["Camille ROUSSEL"], du=_jour(0), jusqu_au=_jour(-2))
+    sejour(client, h, noms=[])
+    assert _sejours_notes() == []
+
+
+def test_sejour_commence_reste_note(monde):
+    """Un séjour commencé (arrivée passée) reste noté quand la chambre est libérée."""
+    client, faux = monde
+    _anciennes(faux)
+    h = avec_jeton_ha()
+    sejour(client, h, noms=["Camille ROUSSEL"], du=_jour(2), jusqu_au=_jour(0))
+    sejour(client, h, noms=[])
+    assert _sejours_notes() == [(CAMILLE, _jour(2), _jour(0))]
+
+
+def test_autres_invites_ou_autres_dates(monde):
+    """Invités remplacés avant l'arrivée : l'ancien séjour à venir est oublié ; arrivée déplacée : le séjour suit."""
+    client, faux = monde
+    _anciennes(faux)
+    h = avec_jeton_ha()
+    sejour(client, h, noms=["Camille ROUSSEL"], du=_jour(-5), jusqu_au=_jour(-7))
+    sejour(client, h, noms=["Camille ROUSSEL"], du=_jour(-4), jusqu_au=_jour(-7))    # même fin, arrivée avancée
+    assert _sejours_notes() == [(CAMILLE, _jour(-4), _jour(-7))]
+    sejour(client, h, noms=["Camille ROUSSEL"], du=_jour(-10), jusqu_au=_jour(-12))  # séjour déplacé
+    assert _sejours_notes() == [(CAMILLE, _jour(-10), _jour(-12))]
+    sejour(client, h, noms=["Inconnu TOTAL"], du=_jour(-10), jusqu_au=_jour(-12))    # autre invité (introuvable)
+    assert _sejours_notes() == []

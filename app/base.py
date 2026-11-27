@@ -114,11 +114,16 @@ class Base:
         maintenant = datetime.now().isoformat(timespec="seconds")
         with self._verrou, self._c:
             self._c.execute("DELETE FROM invites WHERE expire <= ?", (maintenant,))
-            l = self._c.execute("SELECT jeton FROM invites WHERE chambre = ? AND personnes = ? AND expire = ?",
+            l = self._c.execute("SELECT jeton, du FROM invites WHERE chambre = ? AND personnes = ? AND expire = ?",
                                 (chambre, corps, expire)).fetchone()
             if l:
                 self._c.execute("UPDATE invites SET du = ? WHERE jeton = ?", (du, l["jeton"]))
+                if du and l["du"] and du != l["du"]:     # 0.26.7 : arrivée déplacée, le séjour noté suit
+                    ids = [p["id"] for p in personnes if p.get("id")]
+                    self._c.executemany("UPDATE OR REPLACE sejours SET du = ? WHERE personne = ? AND du = ?",
+                                        [(du, i, l["du"]) for i in ids])
                 return l["jeton"]
+            self._oublier_sejour_pas_commence(chambre)       # 0.26.7 : invités changés, ou dates changées
             self._c.execute("DELETE FROM invites WHERE chambre = ?", (chambre,))
             jeton = secrets.token_urlsafe(24)
             # 0.26 : la fin du séjour précédent de ces invités (avant l'arrivée de celui-ci), puis ce séjour est noté
@@ -156,8 +161,22 @@ class Base:
         return [{"jeton": l["jeton"], "chambre": l["chambre"], "personnes": json.loads(l["personnes"]),
                  "expire": l["expire"], "du": l["du"]} for l in lignes]
 
+    def _oublier_sejour_pas_commence(self, chambre: str) -> None:
+        """0.26.7 : le séjour noté pour l'invitation de cette chambre est oublié s'il n'a pas commencé (arrivée
+        aujourd'hui ou plus tard : séjour annulé, remplacé ou déplacé). Un séjour commencé reste noté : il compte
+        pour « Du nouveau depuis votre dernier séjour ». À appeler sous le verrou, dans une transaction."""
+        aujourdhui = datetime.now().date().isoformat()
+        for l in self._c.execute("SELECT personnes, du, cree_le FROM invites WHERE chambre = ?", (chambre,)).fetchall():
+            arrivee = l["du"] or (l["cree_le"] or "")[:10]
+            ids = [p.get("id") for p in json.loads(l["personnes"]) if p.get("id")]
+            if arrivee and arrivee >= aujourdhui and ids:
+                self._c.executemany("DELETE FROM sejours WHERE personne = ? AND du = ?", [(i, arrivee) for i in ids])
+
     def retirer_invites(self, chambre: str) -> None:
+        """Chambre libérée par Home Assistant (séjour fini ou annulé) : son invitation part ; 0.26.7 : un séjour
+        pas commencé (annulé) n'est plus noté."""
         with self._verrou, self._c:
+            self._oublier_sejour_pas_commence(chambre)
             self._c.execute("DELETE FROM invites WHERE chambre = ?", (chambre,))
             self._c.execute("DELETE FROM frises WHERE jeton NOT IN (SELECT jeton FROM invites)")
 

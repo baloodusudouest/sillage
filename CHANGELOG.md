@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 0.26.7 — 28 novembre 2026 (séjour annulé : la chambre libérée, le séjour oublié)
+
+- **Constaté le 27/11/2026 sur la vraie installation** : un séjour annulé dans la carte de réservation de Home Assistant restait plus d'une heure dans l'onglet Chambres. Cause côté Home Assistant (`sillage_invites.yaml` v1.3 ne prévenait pas Sillage), corrigée par `sillage_invites.yaml` v1.4.
+- **Côté Sillage** : quand Home Assistant libère une chambre (`POST /ha/sejour` sans nom), le séjour noté pour « Du nouveau depuis votre dernier séjour » est oublié s'il n'avait pas commencé (arrivée aujourd'hui ou plus tard). Avant, le séjour suivant de l'invité partait de la fin d'un séjour qui n'avait pas eu lieu. Pareil quand les invités d'une chambre sont remplacés avant l'arrivée ; une arrivée déplacée déplace le séjour noté. Un séjour commencé reste noté.
+- Tests `test_sejour_annule_*`, `test_sejour_commence_reste_note`, `test_autres_invites_ou_autres_dates`. Jamais essayé sur la vraie installation.
+
 ## 0.26.6 — 27 novembre 2026 (arbre des invités : le nom de famille partout)
 
 - **Arbre des invités : le nom de famille est toujours montré** (demande de Julien, 27/11/2026), aussi pour un mineur ou une personne sans date de naissance (avant : prénom seul). Inchangé : ni visage ni date pour eux ; une personne cochée « jamais aux invités » dans carnet reste un point sans nom. La règle de vie privée du conseil du 27/11/2026 est assouplie sur ce point par Julien.
