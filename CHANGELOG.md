@@ -1,5 +1,9 @@
 # Journal des versions
 
+## 0.26.1 — 27 novembre 2026 (réglages de l'arbre cachables)
+
+- **Arbre : cacher les réglages de la vue** (demande de Julien, 27/11/2026, sur iPhone) : toucher le titre « Arbre · L'arbre de … » replie les boutons (Vie 3D / Éventail / Arbre, Lien avec…, Liste, Proches / Tout l'arbre, Revenir à…) ; le chevron les remontre. Choix gardé sur l'appareil (`sillage-arbre-replie`). Test d'écran du propriétaire complété. Jamais essayé sur la vraie installation.
+
 ## 0.26.0 — 27 novembre 2026 (« Quoi de neuf » dans les sillages)
 
 - **« Quoi de neuf »** (choix de Julien, 27/11/2026 ; dossier « Quoi de neuf » et conseil du même jour). Est nouveau ce qui a été **ajouté à Immich** après une date (`createdAt`, jour à l'heure du conteneur) : une étape dont toutes les photos sont nouvelles est une **nouvelle étape**, sinon **« +n photos »** ; une nouvelle photo prise avant cette date est **« retrouvée »** (scans, archives). Les 6 étapes les plus fournies sont nommées, le reste résumé (« et n photos dans m autres étapes »). Calcul à la lecture, sans historique.

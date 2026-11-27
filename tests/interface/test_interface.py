@@ -388,6 +388,12 @@ def test_022_arbre_du_proprietaire(page):
     for retiree in ("Constellation", "Sablier", "Hélice"):
         assert page.get_by_role("button", name=retiree, exact=True).count() == 0
     page.locator(".arbre canvas").wait_for()                                          # Vie 3D d'emblée
+    # 0.26.1 : toucher le titre cache les réglages de la vue (et les remontre), gardé sur l'appareil
+    page.get_by_role("button", name="Cacher les réglages de la vue").click()
+    assert page.get_by_role("button", name="Éventail", exact=True).count() == 0
+    assert page.evaluate("localStorage.getItem('sillage-arbre-replie')") == "1"
+    sans_debordement(page)
+    page.get_by_role("button", name="Montrer les réglages de la vue").click()
     assert page.get_by_role("button", name="Vie 3D", exact=True).get_attribute("aria-pressed") == "true"
     page.get_by_role("button", name="Tout l'arbre").click()
     assert page.get_by_role("button", name="Tout l'arbre").get_attribute("aria-pressed") == "true"

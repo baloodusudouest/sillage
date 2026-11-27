@@ -8,6 +8,7 @@
   // three.js n'est chargé qu'à l'ouverture d'une vue 3D.
   import { onMount, onDestroy, tick } from 'svelte'
   import Croix from '$lib/Croix.svelte'
+  import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import { dateLongue } from '$lib/dates.js'
   import { indexer, parente } from '$lib/arbre/parente.js'
   import { chemin as cheminEntre, famille, motEtape, nomDe, prenomNom, surlignage } from '$lib/arbre/famille.js'
@@ -23,6 +24,7 @@
   ]
   const CLE_TOUT = 'sillage-arbre-vie-tout'
   const CLE_AIDE = 'sillage-arbre-aide-2'
+  const CLE_REPLIE = 'sillage-arbre-replie'   // 0.26.1 : réglages de la vue cachés (toucher le titre), gardé sur l'appareil
   const lireStock = (k) => { try { return localStorage.getItem(k) } catch { return null } }
   const ecrireStock = (k, v) => { try { localStorage.setItem(k, v) } catch { /* navigation privée */ } }
 
@@ -139,6 +141,8 @@
     formulaire = null
     monter()
   }
+  let replie = $state(lireStock(CLE_REPLIE) === '1')
+  function replier() { replie = !replie; ecrireStock(CLE_REPLIE, replie ? '1' : '0') }
   function fermerAide() { aide = false; ecrireStock(CLE_AIDE, 'vu') }
   function fermerCarte() { choisie = null; formulaire = null }
   function etendue(v) { if (v === tout) return; tout = v; ecrireStock(CLE_TOUT, v ? '1' : '0'); choisie = null; dessiner() }
@@ -230,10 +234,14 @@
   {/if}
 
   <header class="haut">
-    <div class="verre titre-arbre">
+    <button type="button" class="verre titre-arbre" aria-expanded={!replie} aria-controls="reglages-arbre"
+            aria-label={(replie ? 'Montrer' : 'Cacher') + ' les réglages de la vue'} onclick={replier}>
       <span class="etiquette">Arbre</span>
       <span class="nom">{titre}</span>
-    </div>
+      <ChevronDown class={'chevron size-4' + (replie ? '' : ' ouvert')} aria-hidden="true" />
+    </button>
+    {#if !replie}
+    <div id="reglages-arbre" class="reglages">
     <div class="verre vues" role="group" aria-label="Vue de l'arbre">
       {#each VUES.filter((v) => v.plat || avec3d) as v (v.cle)}
         <button type="button" aria-pressed={vue === v.cle} onclick={() => basculer(v.cle)}>{v.nom}</button>
@@ -252,6 +260,8 @@
         <div class="verre bascule"><button type="button" onclick={revenir}>Revenir à {prenomDe(reference)}</button></div>
       {/if}
     </div>
+    </div>
+    {/if}
   </header>
   <Croix label="Fermer l'arbre" onclick={() => onfermer?.()} />
 
@@ -404,7 +414,13 @@
   .haut { position: absolute; z-index: 61; top: calc(0.75rem + env(safe-area-inset-top, 0px)); left: max(0.75rem, env(safe-area-inset-left, 0px));
           right: calc(4.25rem + env(safe-area-inset-right, 0px)); display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; pointer-events: none; }
   .haut > * { pointer-events: auto; }
-  .titre-arbre { display: grid; padding: 0.45rem 0.9rem; min-width: 0; max-width: 100%; }
+  .titre-arbre { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 0.6rem; align-items: center; padding: 0.45rem 0.9rem;
+                 min-width: 0; max-width: 100%; text-align: left; color: inherit; font: inherit; cursor: pointer; }
+  .titre-arbre .etiquette { grid-column: 1; }
+  .titre-arbre .nom { grid-column: 1; }
+  .titre-arbre :global(.chevron) { grid-column: 2; grid-row: 1 / span 2; color: var(--muted-foreground); transition: rotate 0.2s ease; }
+  .titre-arbre :global(.chevron.ouvert) { rotate: 180deg; }
+  .reglages { display: contents; }
   .titre-arbre .nom { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .vues { display: flex; gap: 0.2rem; padding: 0.25rem; max-width: 100%; overflow-x: auto; }
   .outils { display: flex; gap: 0.5rem; flex-wrap: wrap; }
