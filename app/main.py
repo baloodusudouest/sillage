@@ -837,13 +837,15 @@ def _rafraichir_tout() -> None:
     ETAT["arbre"] = None
     _preparer([i["jeton"] for i in ETAT["base"].invitations()])
     ETAT["nuit"] = datetime.now().isoformat(timespec="seconds")
-    # 0.25 : chaque sillage vérifié ; le dimanche, tous refaits (un album renommé ne change pas l'empreinte)
-    _tout_preparer(datetime.now().weekday() == 6, False, "nuit")
+    # 0.25 : chaque sillage vérifié ; 0.25.1 : le mardi (choix de Julien), tous refaits (un album renommé ne change
+    # pas l'empreinte)
+    _tout_preparer(datetime.now().weekday() == JOUR_REFECTION, False, "nuit")
 
 
 TACHE_NUIT = "frises-de-nuit"              # 0.18 : nom de la boucle de nuit dans /health (taches)
 TACHE_SILLAGES = "preparation-sillages"    # 0.25 : préparation d'un sillage d'une personne de carnet
 PAUSE_SILLAGES = 0.3                       # 0.25 : secondes entre deux personnes (Immich respire)
+JOUR_REFECTION = 1                         # 0.25.1 : la nuit du mardi (lundi 0), tous les sillages sont refaits
 TACHE_PREPARATION = "preparation-frises"   # 0.18 : préparation d'une frise d'invitation (à la demande)
 
 

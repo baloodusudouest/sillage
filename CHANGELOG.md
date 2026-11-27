@@ -1,5 +1,9 @@
 # Journal des versions
 
+## 0.25.1 — 27 novembre 2026 (réfection complète le mardi)
+
+- Les sillages préparés sont **tous refaits dans la nuit du mardi** (choix de Julien, 27/11/2026) au lieu du dimanche ; les autres nuits, vérification par empreinte comme avant (`JOUR_REFECTION`). Phrase de Réglages mise à jour. Jamais essayé sur la vraie installation.
+
 ## 0.25.0 — 27 novembre 2026 (sillages préparés d'avance)
 
 - **Les sillages des personnes de carnet sont préparés d'avance** (demande de Julien, 27/11/2026 ; dossier « Sillages préparés d'avance » et conseil du même jour) et gardés dans la base (table `sillage_pret`). Ouvrir un sillage préparé est instantané : rien n'est relu dans Immich.

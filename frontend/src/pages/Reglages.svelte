@@ -171,7 +171,7 @@
 
 <section class="mt-4 rounded-2xl border bg-card p-5" aria-labelledby="titre-sillages">
   <h2 id="titre-sillages" class="text-lg font-semibold">Sillages préparés</h2>
-  <p class="mt-1 text-sm text-muted-foreground">Le sillage de chaque personne de carnet est préparé d'avance et vérifié chaque nuit : il s'ouvre sans attendre.</p>
+  <p class="mt-1 text-sm text-muted-foreground">Le sillage de chaque personne de carnet est préparé d'avance, vérifié chaque nuit et refait en entier dans la nuit du mardi : il s'ouvre sans attendre.</p>
   {#if etatSillages}
     {@const p = etatSillages.preparation}
     <p class="mt-3 text-sm" role="status">

@@ -138,3 +138,19 @@ def test_demarrage_prepare_les_manquants(monde, monkeypatch):
     assert main._tout_preparer(manquants=True, par="demarrage") == 1
     _finir()
     assert main._tout_preparer(manquants=True, par="demarrage") == 0                 # déjà prêt : rien à faire
+
+
+def test_refection_complete_le_mardi(monde, monkeypatch):
+    """0.25.1 : chaque nuit, vérification ; la nuit du mardi, tous refaits (choix de Julien)."""
+    import datetime as dt
+    appels = []
+    monkeypatch.setattr(main, "_tout_preparer", lambda forcer=False, manquants=False, par="": appels.append((forcer, par)) or 0)
+    monkeypatch.setattr(main, "_preparer", lambda jetons: None)
+    for jour, attendu in ((dt.datetime(2026, 12, 1, 2, 0), True), (dt.datetime(2026, 11, 29, 2, 0), False)):   # mardi, dimanche
+        class Fige(dt.datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return jour
+        monkeypatch.setattr(main, "datetime", Fige)
+        main._rafraichir_tout()
+        assert appels[-1] == (attendu, "nuit")
