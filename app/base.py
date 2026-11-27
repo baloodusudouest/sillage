@@ -61,10 +61,20 @@ class Base:
             CREATE TABLE IF NOT EXISTS sillage_pret (personne TEXT PRIMARY KEY, empreinte TEXT NOT NULL,
                                                      contexte TEXT NOT NULL, contenu TEXT NOT NULL,
                                                      connues TEXT NOT NULL, le TEXT NOT NULL, erreur TEXT);
+            -- 0.26 : séjours passés de chaque invité (pour « Du nouveau depuis votre dernier séjour »)
+            CREATE TABLE IF NOT EXISTS sejours (personne TEXT NOT NULL, du TEXT NOT NULL, fin TEXT NOT NULL,
+                                                PRIMARY KEY (personne, du));
         """)
         # 0.6 : date d'arrivée, pour l'onglet « Chambres » (bases de la 0.5 : colonne ajoutée)
         if "du" not in [l["name"] for l in self._c.execute("PRAGMA table_info(invites)")]:
             self._c.execute("ALTER TABLE invites ADD COLUMN du TEXT NOT NULL DEFAULT ''")
+            self._c.commit()
+        # 0.26 : fin du séjour précédent des invités ; date d'ajout à Immich des photos d'un sillage préparé
+        if "depuis" not in [l["name"] for l in self._c.execute("PRAGMA table_info(invites)")]:
+            self._c.execute("ALTER TABLE invites ADD COLUMN depuis TEXT NOT NULL DEFAULT ''")
+            self._c.commit()
+        if "ajouts" not in [l["name"] for l in self._c.execute("PRAGMA table_info(sillage_pret)")]:
+            self._c.execute("ALTER TABLE sillage_pret ADD COLUMN ajouts TEXT NOT NULL DEFAULT '{}'")
             self._c.commit()
 
     def fermer(self) -> None:
@@ -93,10 +103,11 @@ class Base:
         with self._verrou:
             l = self._c.execute("SELECT * FROM invites WHERE jeton = ? AND expire > ?",
                                 (jeton, datetime.now().isoformat(timespec="seconds"))).fetchone()
-        return ({"chambre": l["chambre"], "personnes": json.loads(l["personnes"]), "expire": l["expire"], "du": l["du"]}
+        return ({"chambre": l["chambre"], "personnes": json.loads(l["personnes"]), "expire": l["expire"], "du": l["du"],
+                 "depuis": l["depuis"]}
                 if l else None)
 
-    def poser_invite(self, chambre: str, personnes: list[dict], expire: str, du: str = "") -> str:
+    def poser_invite(self, chambre: str, personnes: list[dict], expire: str, du: str = "", fin: str = "") -> str:
         """Une invitation par chambre : la même si rien n'a changé, sinon une nouvelle (l'ancienne ne marche plus).
         La date d'arrivée ne compte pas : la changer garde le lien."""
         corps = json.dumps(personnes, ensure_ascii=False, sort_keys=True)
@@ -110,8 +121,19 @@ class Base:
                 return l["jeton"]
             self._c.execute("DELETE FROM invites WHERE chambre = ?", (chambre,))
             jeton = secrets.token_urlsafe(24)
-            self._c.execute("INSERT INTO invites (jeton, chambre, personnes, expire, cree_le, du) VALUES (?, ?, ?, ?, ?, ?)",
-                            (jeton, chambre, corps, expire, maintenant, du))
+            # 0.26 : la fin du séjour précédent de ces invités (avant l'arrivée de celui-ci), puis ce séjour est noté
+            arrivee = du or maintenant[:10]
+            ids = [p["id"] for p in personnes if p.get("id")]
+            depuis = ""
+            if ids:
+                l = self._c.execute(f"SELECT MAX(fin) AS f FROM sejours WHERE personne IN ({','.join('?' * len(ids))}) AND fin < ?",
+                                    (*ids, arrivee)).fetchone()
+                depuis = (l["f"] or "") if l else ""
+                if fin:
+                    self._c.executemany("INSERT INTO sejours VALUES (?, ?, ?) ON CONFLICT(personne, du) DO UPDATE SET fin = excluded.fin",
+                                        [(i, arrivee, fin) for i in ids])
+            self._c.execute("INSERT INTO invites (jeton, chambre, personnes, expire, cree_le, du, depuis) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                            (jeton, chambre, corps, expire, maintenant, du, depuis))
             self._c.execute("DELETE FROM frises WHERE jeton NOT IN (SELECT jeton FROM invites)")
             return jeton
 
@@ -147,15 +169,23 @@ class Base:
         if not l:
             return None
         return {"empreinte": l["empreinte"], "contexte": l["contexte"], "contenu": json.loads(l["contenu"]),
-                "connues": json.loads(l["connues"]), "le": l["le"], "erreur": l["erreur"]}
+                "connues": json.loads(l["connues"]), "le": l["le"], "erreur": l["erreur"], "ajouts": json.loads(l["ajouts"])}
 
-    def garder_sillage(self, personne: str, empreinte: str, contexte: str, contenu: dict, connues: dict) -> str:
+    def garder_sillage(self, personne: str, empreinte: str, contexte: str, contenu: dict, connues: dict,
+                       ajouts: dict | None = None) -> str:
         le = maintenant_tz()
         with self._verrou, self._c:
-            self._c.execute("INSERT OR REPLACE INTO sillage_pret VALUES (?, ?, ?, ?, ?, ?, NULL)",
+            self._c.execute("INSERT OR REPLACE INTO sillage_pret (personne, empreinte, contexte, contenu, connues, le, erreur, ajouts)"
+                            " VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
                             (personne, empreinte, contexte, json.dumps(contenu, ensure_ascii=False),
-                             json.dumps(connues), le))
+                             json.dumps(connues), le, json.dumps(ajouts or {})))
         return le
+
+    def sillages_et_ajouts(self) -> list[tuple[str, dict, dict]]:
+        """0.26 : (personne, contenu, ajouts) de chaque sillage préparé, pour « Quoi de neuf »."""
+        with self._verrou:
+            ls = self._c.execute("SELECT personne, contenu, ajouts FROM sillage_pret").fetchall()
+        return [(l["personne"], json.loads(l["contenu"]), json.loads(l["ajouts"])) for l in ls]
 
     def erreur_sillage(self, personne: str, erreur: str) -> None:
         """Un essai manqué : le sillage d'avant reste, l'erreur est notée."""

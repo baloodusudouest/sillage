@@ -22,9 +22,21 @@
     return parCarnet && !mot ? [...liste.filter((p) => p.proche), ...liste.filter((p) => !p.proche)] : liste
   })
 
+  // 0.26 : « Quoi de neuf » : photos ajoutées à Immich depuis 30 jours dans les sillages préparés (personnes de carnet)
+  let neuf = $state(null)
+  const anneeDe = (e) => e.debut.slice(0, 4)
+  const ligne = (e) => e.nouvelle
+    ? 'Nouvelle étape : ' + (e.nom ? e.nom + ', ' + anneeDe(e) : anneeDe(e)) + ' (' + e.photos + ' photo' + (e.photos > 1 ? 's' : '') + ')'
+    : '+' + e.photos + ' photo' + (e.photos > 1 ? 's' : '') + ' dans ' + (e.nom ? e.nom + ', ' + anneeDe(e) : 'l\'étape de ' + anneeDe(e))
+  const quandAjout = (j) => {
+    const n = Math.round((new Date(new Date().toDateString()) - new Date(j + 'T00:00:00')) / 86400000)
+    return n <= 0 ? 'aujourd\'hui' : n === 1 ? 'hier' : 'il y a ' + n + ' jours'
+  }
+
   onMount(async () => {
     try { const r = await api.get('/api/personnes'); parCarnet = r.par_carnet; carnet = r.carnet || {}; personnes = r.personnes }
     catch (err) { if (err.statut === 401) ondeconnecte?.(); else erreur = err.message }
+    try { neuf = await api.get('/api/nouveautes') } catch { neuf = null }
   })
 </script>
 
@@ -53,6 +65,27 @@
   {:else if parCarnet && !cherche.trim()}
     <p class="mb-3 text-sm text-muted-foreground">Les fiches de carnet liées à Immich. Une autre personne d'Immich ? Cherche son nom.</p>
   {/if}
+  {#if neuf?.personnes?.length && !cherche.trim() && !aVerifier}
+    <section class="neuf" aria-labelledby="titre-neuf">
+      <h2 id="titre-neuf" class="etiquette">Quoi de neuf · {neuf.jours} derniers jours</h2>
+      <ul>
+        {#each neuf.personnes as p (p.personne)}
+          <li>
+            <img src={'/api/portrait/' + p.personne} alt="" loading="lazy" />
+            <div class="min-w-0">
+              <p class="font-medium">{p.nom} <small>· {quandAjout(p.ajoutee_le)}</small></p>
+              <ul class="lignes">
+                {#each p.etapes as e (e.cle)}
+                  <li><a href={'#/chemin/' + p.personne + '/' + encodeURIComponent(e.cle)}>{ligne(e)}{e.retrouvee && !e.nouvelle ? ' · retrouvée' : ''}</a></li>
+                {/each}
+                {#if p.autres_etapes}<li class="reste">et {p.autres_photos} photo{p.autres_photos > 1 ? 's' : ''} dans {p.autres_etapes} autre{p.autres_etapes > 1 ? 's' : ''} étape{p.autres_etapes > 1 ? 's' : ''}</li>{/if}
+              </ul>
+            </div>
+          </li>
+        {/each}
+      </ul>
+    </section>
+  {/if}
   {#if sansNaissance.length}
     <button type="button" class="averifier" aria-pressed={aVerifier} onclick={() => (aVerifier = !aVerifier)}>
       <span class="etiquette">À vérifier</span>
@@ -75,6 +108,15 @@
 {/if}
 
 <style>
+  .neuf { margin-bottom: 1rem; padding: 0.9rem 1.1rem; border: 1px solid var(--border); border-left: 4px solid var(--app); border-radius: 1rem; background: var(--card); }
+  .neuf > ul { display: grid; gap: 0.8rem; margin-top: 0.6rem; }
+  .neuf > ul > li { display: flex; gap: 0.75rem; align-items: flex-start; }
+  .neuf img { width: 2.6rem; height: 2.6rem; flex: none; border-radius: 50%; object-fit: cover; background: var(--secondary); }
+  .neuf small { color: var(--muted-foreground); font-weight: 400; }
+  .lignes { display: grid; gap: 0.15rem; font-size: 0.875rem; }
+  .lignes a { color: var(--foreground); text-decoration: underline; text-decoration-color: var(--border); text-underline-offset: 3px; }
+  .lignes a:hover { text-decoration-color: var(--app); }
+  .lignes .reste { color: var(--muted-foreground); }
   .averifier { display: grid; gap: 0.15rem; width: 100%; margin-bottom: 1rem; padding: 0.9rem 1.1rem; text-align: left; border: 1px solid var(--border); border-left: 4px solid var(--app); border-radius: 1rem; background: var(--card); }
   .averifier[aria-pressed='true'] { border-color: var(--app); }
   .averifier small { color: var(--muted-foreground); }

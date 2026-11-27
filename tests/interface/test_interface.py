@@ -454,3 +454,62 @@ def test_022_arbre_de_l_invite_et_proposition(page):
     page.locator(".panneau").get_by_role("button", name=re.compile("^Hugo")).click()
     page.locator(".resultat").get_by_text("de Léa", exact=False).wait_for()
     sans_debordement(page)
+
+
+def test_026_quoi_de_neuf_du_proprietaire(page):
+    """0.26 : bloc « Quoi de neuf » de la liste des sillages ; toucher une ligne ouvre le sillage sur l'étape, les photos
+    nouvelles marquées. La réponse de /api/nouveautes est simulée (le carnet de démonstration n'a aucune fiche)."""
+    import json
+    _connecte(page, "/#/chemin/" + CAMILLE)
+    page.wait_for_selector(".etape")
+    ch = page.evaluate(f"fetch('/api/chemin/{CAMILLE}').then(r => r.json())")
+    etape = next(e for c in ch["chapitres"] for e in c["etapes"] if e["nombre"] > 1)
+    neuves = [p["id"] for p in etape["photos"][:2]]
+    reponse = {"depuis": "2026-10-28", "jours": 30, "personnes": [{
+        "personne": CAMILLE, "nom": "Camille ROUSSEL", "ajoutee_le": "2026-11-26", "autres_photos": 4, "autres_etapes": 2,
+        "etapes": [{"cle": etape["cle"], "nom": etape["nom"], "debut": etape["debut"], "fin": etape["fin"], "photos": 2,
+                    "nombre": etape["nombre"], "nouvelle": False, "retrouvee": True, "phare": etape["phare"],
+                    "ajoutee_le": "2026-11-26"}]}]}
+    page.route("**/api/nouveautes", lambda r: r.fulfill(status=200, content_type="application/json", body=json.dumps(reponse)))
+    page.route(f"**/api/chemin/{CAMILLE}", lambda r: r.fulfill(
+        status=200, content_type="application/json", body=json.dumps({**r.fetch().json(), "nouvelles": neuves})))
+    page.goto(page.base + "/#/sillages")
+    bloc = page.locator("section.neuf")
+    bloc.get_by_text("Camille ROUSSEL").wait_for()
+    bloc.get_by_text("et 4 photos dans 2 autres étapes").wait_for()
+    sans_debordement(page)
+    bloc.get_by_role("link", name=re.compile(r"^\+2 photos")).click()
+    page.get_by_role("dialog").wait_for()                                             # l'étape est ouverte
+    assert page.locator(".galerie .neuve").count() == 2
+    assert page.locator(".etape .neuf").count() >= 1
+    page.keyboard.press("Escape")
+    page.unroute("**/api/nouveautes")
+    page.unroute(f"**/api/chemin/{CAMILLE}")
+
+
+def test_026_du_nouveau_pour_l_invite(page):
+    """0.26 : bloc « Du nouveau depuis votre dernier séjour » en haut de la page de l'invité (réponse simulée)."""
+    import json
+    jetons = invitations()
+    page.context.clear_cookies()
+    adresse = jetons["seule"]
+    jeton = adresse.rsplit("/", 1)[1]
+
+    def avec_neuf(route):
+        d = route.fetch().json()
+        c = (d["commun"] or d["chacun"][0])
+        e = [x for ch in c["chapitres"] for x in ch["etapes"]][-1]
+        d["nouveautes"] = {"depuis": "2026-08-17", "autres_photos": 3, "autres_etapes": 1,
+                           "etapes": [{"cle": e["cle"], "nom": e["nom"], "debut": e["debut"], "photos": 5, "nouvelle": True,
+                                       "retrouvee": False, "phare": e["phare"]}]}
+        route.fulfill(status=200, content_type="application/json", body=json.dumps(d))
+    page.route(f"**/api/invite/{jeton}", avec_neuf)
+    page.goto(page.base + adresse)
+    bloc = page.locator("section.neuf")
+    bloc.get_by_text("Du nouveau depuis votre dernier séjour").wait_for()
+    bloc.get_by_text("17 août 2026").wait_for()
+    bloc.get_by_text("Et 3 photos de plus dans le chemin.").wait_for()
+    sans_debordement(page)
+    bloc.get_by_role("button").first.click()
+    page.wait_for_timeout(600)
+    page.unroute(f"**/api/invite/{jeton}")

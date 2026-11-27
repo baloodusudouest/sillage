@@ -29,8 +29,8 @@
   let route = $state(lireRoute())
 
   function lireRoute() {
-    const [page, id] = location.hash.replace('#/', '').split('/')
-    if (page === 'chemin' && id) return { page, id, onglet: 'sillages' }
+    const [page, id, etape] = location.hash.replace('#/', '').split('/')
+    if (page === 'chemin' && id) return { page, id, etape: etape ? decodeURIComponent(etape) : '', onglet: 'sillages' }
     const p = onglets.some((o) => o.page === page) ? page : 'sillages'
     return { page: p, onglet: p }
   }
@@ -92,7 +92,7 @@
       {#key route.page + (route.id || '')}
         <div in:fly={{ y: 6, duration: 180 }}>
           {#if route.page === 'chemin'}
-            <Chemin id={route.id} ondeconnecte={dehors} />
+            <Chemin id={route.id} etapeVoulue={route.etape} ondeconnecte={dehors} />
           {:else if route.page === 'chambres'}
             <Chambres ondeconnecte={dehors} />
           {:else if route.page === 'connexion'}

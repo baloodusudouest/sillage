@@ -419,6 +419,62 @@ def _calcul_sur(personne: str, fiche: dict, photos: list[dict]) -> dict:
                            estimees=estimees, non_datees=non_datees)
 
 
+# ---------------------------------------------------------------- « Quoi de neuf » (0.26)
+NOUVEAUTES_JOURS = 30        # fenêtre de Julien
+NOUVEAUTES_MAX = 6           # étapes nommées une à une ; au-delà : « et n photos dans m autres étapes »
+
+
+def _jour_local(texte: str) -> str:
+    """Le jour (heure du conteneur) d'une date d'Immich en UTC (« 2026-11-27T23:30:00.000Z » → « 2026-11-28 » à Paris)."""
+    if not texte:
+        return ""
+    try:
+        return datetime.fromisoformat(texte.replace("Z", "+00:00")).astimezone().date().isoformat()
+    except ValueError:
+        return texte[:10]
+
+
+def _ajouts(photos: list[dict]) -> dict[str, str]:
+    """0.26 : photo → jour de son ajout à Immich (`createdAt`), photos visibles seulement."""
+    return {p["id"]: _jour_local(p.get("createdAt") or "") for p in photos if calcul.visible(p)}
+
+
+def _nouveautes(etapes: list[dict], ajouts: dict[str, str], depuis: str, photos_de=None) -> dict:
+    """0.26 : ce qui est arrivé depuis `depuis` dans ces étapes : une étape dont toutes les photos sont nouvelles est une
+    nouvelle étape, sinon « +n photos ». Une nouvelle photo prise avant `depuis` est « retrouvée » (archives, scans),
+    sinon « récente ». Les plus fournies d'abord, `NOUVEAUTES_MAX` nommées, le reste résumé. `photos_de(e)` : les
+    photos d'une étape (par défaut `e["photos"]`)."""
+    liste = []
+    for e in etapes:
+        if e.get("masquee"):
+            continue
+        ids = [p["id"] if isinstance(p, dict) else p for p in (photos_de(e) if photos_de else e.get("photos") or [])]
+        neuves = [i for i in ids if (ajouts.get(i) or "") > depuis]
+        if not neuves:
+            continue
+        liste.append({"cle": e["cle"], "nom": e.get("nom") or "", "debut": e["debut"], "fin": e.get("fin") or e["debut"],
+                      "photos": len(neuves), "nombre": len(ids), "nouvelle": len(neuves) == len(ids),
+                      "retrouvee": (e.get("fin") or e["debut"]) < depuis, "phare": e.get("phare"),
+                      "nouvelles": neuves, "ajoutee_le": max(ajouts[i] for i in neuves)})
+    liste.sort(key=lambda n: (-n["photos"], n["debut"]))
+    reste = liste[NOUVEAUTES_MAX:]
+    return {"etapes": liste[:NOUVEAUTES_MAX], "autres_photos": sum(n["photos"] for n in reste), "autres_etapes": len(reste)}
+
+
+def _depuis_jours(jours: int) -> str:
+    return (date.today() - timedelta(days=jours)).isoformat()
+
+
+def _recentes(ajouts: dict[str, str]) -> list[str]:
+    """Les photos ajoutées à Immich dans les 30 derniers jours (marquées « nouvelle » dans le chemin)."""
+    d = _depuis_jours(NOUVEAUTES_JOURS)
+    return sorted(i for i, j in ajouts.items() if j and j > d)
+
+
+def _etapes_de(contenu: dict) -> list[dict]:
+    return [e for ch in contenu.get("chapitres", []) for e in ch["etapes"]]
+
+
 def _verrou_sillage(personne: str) -> threading.Lock:
     with VERROU:
         return ETAT["verrous_sillages"].setdefault(personne, threading.Lock())
@@ -431,13 +487,15 @@ def _preparer_sillage(personne: str, fiche: dict, forcer: bool = False, recentes
         photos = _lire_photos(personne, recentes=recentes)
         empreinte, contexte = _empreinte(photos), _contexte(personne, photos)
         deja = ETAT["base"].sillage_pret(personne)
-        if deja and not forcer and deja["empreinte"] == empreinte and deja["contexte"] == contexte and not deja["erreur"]:
-            return deja["contenu"], False
+        ajouts = _ajouts(photos)
+        if deja and not forcer and deja["empreinte"] == empreinte and deja["contexte"] == contexte and not deja["erreur"] \
+                and (deja["ajouts"] or not ajouts):
+            return {**deja["contenu"], "nouvelles": _recentes(deja["ajouts"])}, False
         contenu = _calcul_sur(personne, fiche, photos)
         connues = {p["id"]: p.get("checksum") or "" for p in photos if calcul.visible(p)}
         if fiche.get("carnet"):                    # seules les personnes de carnet sont gardées (choix de Julien)
-            ETAT["base"].garder_sillage(personne, empreinte, contexte, contenu, connues)
-        return contenu, True
+            ETAT["base"].garder_sillage(personne, empreinte, contexte, contenu, connues, ajouts)
+        return {**contenu, "nouvelles": _recentes(ajouts)}, True
 
 
 def _calcul_du_chemin(personne: str, fiche: dict, frais: bool = False) -> dict:
@@ -450,13 +508,57 @@ def _calcul_du_chemin(personne: str, fiche: dict, frais: bool = False) -> dict:
     pret = ETAT["base"].sillage_pret(personne) if fiche.get("carnet") else None
     if pret:
         ETAT["connues"].update(pret["connues"])            # les corrections marchent sans relire Immich
-        return {**pret["contenu"], "pret": pret["le"]}
+        return {**pret["contenu"], "pret": pret["le"], "nouvelles": _recentes(pret["ajouts"])}
     return _preparer_sillage(personne, fiche, recentes=True)[0]
 
 
 @app.get("/api/chemin/{personne}")
 def chemin(personne: str, request: Request, frais: bool = False):
     return _chemin(personne, frais, request.headers.get("host", ""))
+
+
+@app.get("/api/nouveautes")
+def nouveautes():
+    """0.26 : « Quoi de neuf » de Julien : les sillages préparés (personnes de carnet) qui ont des photos ajoutées à
+    Immich depuis 30 jours, les plus récents d'abord."""
+    depuis = _depuis_jours(NOUVEAUTES_JOURS)
+    try:
+        gens = _personnes()
+    except Exception:
+        gens = {}
+    sortie = []
+    for personne, contenu, ajouts in ETAT["base"].sillages_et_ajouts():
+        f = gens.get(personne)
+        if not f or not f.get("carnet"):
+            continue
+        n = _nouveautes(_etapes_de(contenu), ajouts, depuis)
+        if n["etapes"]:
+            sortie.append({"personne": personne, "nom": contenu["personne"]["nom"], **n,
+                           "ajoutee_le": max(e["ajoutee_le"] for e in n["etapes"]),
+                           "etapes": [{k: v for k, v in e.items() if k != "nouvelles"} for e in n["etapes"]]})
+    sortie.sort(key=lambda x: x["ajoutee_le"], reverse=True)
+    return {"depuis": depuis, "jours": NOUVEAUTES_JOURS, "personnes": sortie}
+
+
+@app.get("/externe/nouveautes")
+def nouveautes_externes(request: Request, personne: str = "", depuis: str = ""):
+    """0.26, contrat 1 avec la Gazette (La Récidive) : les nouveautés du sillage d'une personne depuis un jour (la fin de
+    son séjour précédent) : étapes {nom, annee, photos (nouvelles), nombre, nouvelle, retrouvee}, 6 au plus, puis le
+    reste résumé. Mêmes photos que la frise d'un invité seul (photos visibles, corrections de Julien comprises).
+    Personne inconnue : liste vide."""
+    _porte_commune(request)
+    if not JOUR.match(depuis):
+        raise HTTPException(422, "depuis : un jour AAAA-MM-JJ est attendu.")
+    fiche = _personnes().get(personne) if UUID.match(personne) else None
+    if not fiche:
+        return {"contrat": 1, "etapes": [], "autres_photos": 0, "autres_etapes": 0}
+    contenu = _calcul_du_chemin(personne, fiche)
+    pret = ETAT["base"].sillage_pret(personne) if fiche.get("carnet") else None
+    ajouts = pret["ajouts"] if pret and pret["ajouts"] else _ajouts(_lire_photos(personne, recentes=True))
+    n = _nouveautes(_etapes_de(contenu), ajouts, depuis)
+    return {"contrat": 1, "autres_photos": n["autres_photos"], "autres_etapes": n["autres_etapes"],
+            "etapes": [{"nom": e["nom"], "annee": int(e["debut"][:4]), "debut": e["debut"], "photos": e["photos"],
+                        "nombre": e["nombre"], "nouvelle": e["nouvelle"], "retrouvee": e["retrouvee"]} for e in n["etapes"]]}
 
 
 @app.get("/api/chemin/{personne}/verifier")
@@ -551,7 +653,7 @@ def sejour(corps: dict = Body(...)):
     for n in noms:
         p = _trouver(n)
         (trouves.append({"id": p["id"], "nom": n}) if p else manquants.append(n))
-    jeton = ETAT["base"].poser_invite(chambre, trouves or [{"id": "", "nom": n} for n in noms], expire, du)
+    jeton = ETAT["base"].poser_invite(chambre, trouves or [{"id": "", "nom": n} for n in noms], expire, du, dernier.isoformat())
     if not ETAT["base"].frise(jeton):                # nouvelle invitation : sa frise se prépare tout de suite, en fond
         _en_fond(_preparer, [jeton])
     return {"chemin": f"/invite/{jeton}", "trouves": [t["nom"] for t in trouves], "manquants": manquants, "expire": expire}
@@ -641,6 +743,7 @@ def _calculer(inv: dict) -> dict:
     # d'un invité hors du chemin faute de date (tag des non datées, sans estimation), sauf celles que Julien a écartées.
     estimees, non_datees = _reperes()
     photos_gens: set[str] = set()
+    ajouts: dict[str, str] = {}                  # 0.26 : jour d'ajout à Immich de chaque photo de la frise
     dates: dict[str, str | None] = {}
     aidez: dict[str, str] = {}
     for g in gens:
@@ -649,6 +752,7 @@ def _calculer(inv: dict) -> dict:
             if not calcul.visible(p) or not (len(gens) == 1 or tous <= _personnes_sur(p) or _personnes_sur(p) <= {g["id"]} | hotes):
                 continue
             photos_gens.add(p["id"])
+            ajouts[p["id"]] = _jour_local(p.get("createdAt") or "")
             sans_date = p["id"] in non_datees and p["id"] not in estimees
             quand = calcul.date_de(p)
             dates[p["id"]] = None if sans_date or quand is None else quand.date().isoformat()
@@ -656,7 +760,7 @@ def _calculer(inv: dict) -> dict:
             if sans_date and not ecartee:
                 aidez.setdefault(p["id"], p.get("localDateTime") or p.get("fileCreatedAt") or "")
     return {**resultat, "_phares": phares, "_gens": [g["id"] for g in gens], "_photos_etapes": photos_etapes,
-            "_photos_gens": sorted(photos_gens), "_dates": dates,
+            "_photos_gens": sorted(photos_gens), "_dates": dates, "_ajouts": ajouts,
             "_aidez": [i for i, _ in sorted(aidez.items(), key=lambda x: (x[1], x[0]))][:AIDEZ_MAX]}
 
 
@@ -1041,6 +1145,19 @@ def _vue_invite(jeton: str, inv: dict) -> dict:
     vue["commun"] = chemin_(vue["commun"]) if vue.get("commun") else vue.get("commun")
     vue["chacun"] = [chemin_(c) for c in vue.get("chacun") or []]
     vue["aidez"] = [{"id": _opaque(jeton, a)} for a in inv.get("_aidez", [])]
+    # 0.26 : « Du nouveau depuis votre dernier séjour » : étapes de sa frise, photos ajoutées depuis la fin du séjour
+    # précédent (rien sans séjour précédent) ; photos et étapes de sa vue seulement
+    depuis = (ETAT["base"].invite(jeton) or {}).get("depuis") or ""
+    vue["nouveautes"] = None
+    if depuis and inv.get("_ajouts"):
+        etapes = [e for c in ([inv["commun"]] if inv.get("commun") else []) + list(inv.get("chacun") or [])
+                  for ch in c["chapitres"] for e in ch["etapes"]]
+        album = inv.get("_photos_etapes", {})
+        n = _nouveautes(etapes, inv["_ajouts"], depuis, photos_de=lambda e: album.get(e["phare"]) or [e["phare"]])
+        vue["nouveautes"] = {"depuis": depuis, "autres_photos": n["autres_photos"], "autres_etapes": n["autres_etapes"],
+                             "etapes": [{"cle": e["cle"], "nom": e["nom"], "debut": e["debut"], "photos": e["photos"],
+                                         "nouvelle": e["nouvelle"], "retrouvee": e["retrouvee"],
+                                         "phare": _opaque(jeton, e["phare"])} for e in n["etapes"]]}
     return vue
 
 

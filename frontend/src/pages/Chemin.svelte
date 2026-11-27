@@ -1,7 +1,7 @@
 <script>
   // Le chemin d'une personne : un chapitre par décennie d'âge, les étapes posées le long du trait.
   // Sur PC les étapes alternent de part et d'autre du trait ; sur iPhone elles sont d'un seul côté.
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import ArrowLeft from '@lucide/svelte/icons/arrow-left'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import EyeOff from '@lucide/svelte/icons/eye-off'
@@ -12,7 +12,7 @@
   import GitFork from '@lucide/svelte/icons/git-fork'
   import Arbre from '$lib/Arbre.svelte'
 
-  let { id, ondeconnecte } = $props()
+  let { id, etapeVoulue = '', ondeconnecte } = $props()   // 0.26 : #/chemin/<id>/<étape> ouvre cette étape
   let chemin = $state(null)
   let erreur = $state('')
   let lecture = $state(false)
@@ -92,6 +92,18 @@
     catch (err) { if (err.statut === 401) ondeconnecte?.(); else erreur = err.message }
     lecture = false
     if (chemin?.pret && !frais) verifier()
+    if (etapeVoulue && !frais && chemin) ouvrirVoulue()
+  }
+  // 0.26 : arrivé par « Quoi de neuf » : l'étape est ouverte et sa carte amenée à l'écran
+  const nouvelles = $derived(new Set(chemin?.nouvelles || []))
+  async function ouvrirVoulue() {
+    const e = chemin.chapitres.flatMap((c) => c.etapes).find((x) => x.cle === etapeVoulue)
+    if (!e) return
+    if (e.masquee) masquees = true
+    if (!e.temps_fort) tout = true
+    await tick()
+    document.getElementById('etape-' + e.cle)?.scrollIntoView({ block: 'center' })
+    ouverte = e.cle
   }
   // 0.25 : sillage préparé d'avance → affiché tout de suite, puis Sillage vérifie les photos et refait l'écran si besoin
   async function verifier() {
@@ -166,11 +178,12 @@
         <h2 class="chapitre"><span>{c.titre}</span></h2>
         <ol>
           {#each c.etapes as e (e.cle)}
-            <li class="etape {e.cote}" class:petite={e.nombre === 1 && !e.nom} class:masquee={e.masquee} use:apparait>
+            <li id={'etape-' + e.cle} class="etape {e.cote}" class:petite={e.nombre === 1 && !e.nom} class:masquee={e.masquee} use:apparait>
               <span class="point" class:fort={e.temps_fort} class:vers={e.vers != null} aria-hidden="true"></span>
               <button type="button" class="carte" onclick={() => (ouverte = e.cle)} aria-label={(e.nom || quandDit(e)) + ', ' + e.nombre + ' photo' + (e.nombre > 1 ? 's' : '')}>
                 <img src={'/api/vignette/' + e.phare} alt="" loading="lazy" />
                 <span class="dit">
+                  {#if e.photos?.some((p) => nouvelles.has(p.id))}<span class="neuf">Nouveau</span>{/if}
                   <strong class:plume={!!e.nom}>{#if e.masquee}<EyeOff class="mr-1 inline size-4 align-[-2px]" aria-label="Masquée" />{/if}{e.nom || quandDit(e)}</strong>
                   <small>{e.nom ? quandDit(e) + foisDit(e) + ' · ' : ''}{ageDit(e.age, e.vers)}{e.age != null && e.nombre > 1 ? ' · ' : ''}{e.nombre > 1 ? e.nombre + ' photos' : ''}</small>
                 </span>
@@ -218,7 +231,7 @@
 {/if}
 
 {#if etapeOuverte}
-  <Etape etape={etapeOuverte} immich={chemin.immich} portImmich={chemin.immich_port} oncorrige={corriger} onferme={() => (ouverte = null)} />
+  <Etape etape={etapeOuverte} {nouvelles} immich={chemin.immich} portImmich={chemin.immich_port} oncorrige={corriger} onferme={() => (ouverte = null)} />
 {/if}
 
 {#if arbreOuvert && arbre}
@@ -226,6 +239,7 @@
 {/if}
 
 <style>
+  .neuf { display: inline-block; width: fit-content; margin-bottom: 0.15rem; padding: 0 0.45rem; border-radius: 999px; font-size: 0.7rem; font-weight: 600; background: var(--app); color: var(--app-contraste); }
   .chemin { position: relative; --trait: 1.25rem; }
   .chemin::before { content: ""; position: absolute; top: 0; bottom: 0; left: var(--trait); width: 3px; margin-left: -1.5px; border-radius: 3px;
                     background: color-mix(in oklab, var(--app) 22%, transparent); }

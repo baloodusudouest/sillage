@@ -10,7 +10,7 @@
   import { api } from './api.js'
   import { ageDit, periode, quandDit, foisDit } from '$lib/dates.js'
 
-  let { etape, immich = '', portImmich = 0, onferme, oncorrige } = $props()
+  let { etape, nouvelles = new Set(), immich = '', portImmich = 0, onferme, oncorrige } = $props()
   let album = $state(null)   // 0.12 : la photo dont on ouvre l'album
   // Immich dans le navigateur : l'adresse réglée, sinon le même hôte que Sillage sur le port d'Immich (en http).
   // Ce lien fait partie des gestes de correction : il est pour le propriétaire, pas pour une future vue d'invité.
@@ -81,6 +81,7 @@
           <img src={'/api/vignette/' + p.id} alt="" loading="lazy" />
           {#if p.id === etape.phare}<span class="phare" title="Photo phare"><Star class="size-3.5" aria-label="Photo phare" /></span>{/if}
           {#if p.video}<span class="video"><Play class="size-4" aria-hidden="true" /></span>{/if}
+          {#if nouvelles.has(p.id)}<span class="neuve">Nouvelle</span>{/if}
         </button>
       </li>
     {/each}
@@ -123,6 +124,7 @@
 </dialog>
 
 <style>
+  .neuve { position: absolute; left: 0.35rem; bottom: 0.35rem; padding: 0 0.4rem; border-radius: 999px; font-size: 0.68rem; font-weight: 600; background: var(--app); color: var(--app-contraste); }
   .etape-ouverte { width: min(64rem, 100%); max-width: 100%; height: 100dvh; max-height: 100dvh; margin: 0 auto; padding: 0; border: 0; background: var(--background); color: var(--foreground); overflow-y: auto; }
   .etape-ouverte::backdrop { background: rgb(0 0 0 / 0.7); }
   header { position: sticky; top: 0; z-index: 2; display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem;

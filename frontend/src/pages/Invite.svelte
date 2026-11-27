@@ -5,7 +5,7 @@
   // 0.17 : sous chaque photo, « Pas la bonne année ? » (avis transmis à Julien, jamais écrit dans Immich) ;
   // en bas, « Aidez-moi à dater » : des photos des invités qui attendent leur année. Les photos sont nommées par
   // un identifiant propre à Sillage, jamais par celui d'Immich.
-  import { onMount } from 'svelte'
+  import { onMount, tick } from 'svelte'
   import { ageDit, periode, quandDit, foisDit } from '$lib/dates.js'
   import Album from '$lib/Album.svelte'
   import Croix from '$lib/Croix.svelte'
@@ -27,6 +27,18 @@
   let arbre = $state(null)
   let restantes = $state(0)
   let arbreOuvert = $state(false)
+  // 0.26 : « Du nouveau depuis votre dernier séjour » : toucher une ligne descend jusqu'à l'étape dans la frise
+  const finDit = (j) => new Date(j + 'T00:00:00').toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })
+  const ligneNeuf = (e) => (e.nouvelle ? 'Nouveau : ' : '+' + e.photos + ' photo' + (e.photos > 1 ? 's' : '') + ' · ')
+    + (e.nom ? e.nom + ', ' : '') + e.debut.slice(0, 4) + (e.nouvelle ? ' (' + e.photos + ' photo' + (e.photos > 1 ? 's' : '') + ')' : '')
+  async function allerA(cle) {
+    const i = chemins.findIndex((c) => c.chapitres.some((ch) => ch.etapes.some((x) => x.cle === cle)))
+    if (i >= 0) rang = i
+    tout = true
+    choisis = []
+    await tick()
+    document.getElementById('etape-' + cle)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }
   const prendreAvis = (j) => { if (j) { avis = j.signalements || {}; redatees = j.photos_redatees || 0 } }
   const merci = (n) => n === 1 ? 'Grâce à vous, 1 photo a retrouvé son année.' : `Grâce à vous, ${n} photos ont retrouvé leur année.`
   // 0.11 : plusieurs invités : un clic sur un prénom ou sur « Ensemble » ne garde que ces étapes (plusieurs à la fois) ; rien de choisi = tout
@@ -142,6 +154,22 @@
       {@render boutonArbre()}
     </header>
 
+    {#if d.nouveautes?.etapes?.length}
+      <section class="neuf" aria-labelledby="titre-neuf">
+        <h2 id="titre-neuf">Du nouveau depuis votre dernier séjour</h2>
+        <p class="depuis">Photos arrivées depuis le {finDit(d.nouveautes.depuis)}.</p>
+        <ul>
+          {#each d.nouveautes.etapes as e (e.cle)}
+            <li><button type="button" onclick={() => allerA(e.cle)}>
+              <img src={`/api/invite/${encodeURIComponent(jeton)}/vignette/${e.phare}`} alt="" loading="lazy" />
+              <span>{ligneNeuf(e)}</span>
+            </button></li>
+          {/each}
+        </ul>
+        {#if d.nouveautes.autres_etapes}<p class="depuis">Et {d.nouveautes.autres_photos} photo{d.nouveautes.autres_photos > 1 ? 's' : ''} de plus dans le chemin.</p>{/if}
+      </section>
+    {/if}
+
     {#if chemins.length > 1}
       <div class="onglets" role="group" aria-label="Chemin de">
         {#each chemins as c, i}<button type="button" aria-pressed={i === rang} onclick={() => { rang = i; choisis = [] }}>{c.nom}</button>{/each}
@@ -165,7 +193,7 @@
             <h2 class="chapitre"><span>{c.titre}</span></h2>
             <ol>
               {#each c.etapes as e (e.cle)}
-                <li class="etape {e.cote}" class:petite={e.nombre === 1 && !e.nom} class:colore={e.qui != null} style:--qui={couleur(e.qui)} use:apparait>
+                <li id={'etape-' + e.cle} class="etape {e.cote}" class:petite={e.nombre === 1 && !e.nom} class:colore={e.qui != null} style:--qui={couleur(e.qui)} use:apparait>
                   <span class="point" class:fort={e.temps_fort} class:vers={e.vers != null} aria-hidden="true"></span>
                   <div class="carte">
                     <button type="button" class="ouvrir" aria-label={'Voir en grand : ' + (e.nom || quandDit(e))} onclick={() => (grande = e)}>
@@ -220,6 +248,12 @@
 {/if}
 
 <style>
+  .neuf { margin: 0 0 1.5rem; padding: 1rem 1.1rem; border: 1px solid var(--border); border-left: 4px solid var(--app); border-radius: 1rem; background: var(--card); }
+  .neuf h2 { font-size: 1.05rem; font-weight: 600; }
+  .neuf .depuis { margin-top: 0.15rem; font-size: 0.85rem; color: var(--muted-foreground); }
+  .neuf ul { display: grid; gap: 0.5rem; margin-top: 0.7rem; }
+  .neuf button { display: flex; gap: 0.7rem; align-items: center; width: 100%; text-align: left; font-size: 0.9rem; }
+  .neuf img { width: 3rem; height: 3rem; flex: none; border-radius: 0.6rem; object-fit: cover; background: var(--secondary); }
   .chemin { position: relative; --trait: 1.25rem; }
   .chemin::before { content: ""; position: absolute; top: 0; bottom: 0; left: var(--trait); width: 3px; margin-left: -1.5px; border-radius: 3px;
                     background: color-mix(in oklab, var(--app) 22%, transparent); }

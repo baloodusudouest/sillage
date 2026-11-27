@@ -1,5 +1,14 @@
 # Journal des versions
 
+## 0.26.0 — 27 novembre 2026 (« Quoi de neuf » dans les sillages)
+
+- **« Quoi de neuf »** (choix de Julien, 27/11/2026 ; dossier « Quoi de neuf » et conseil du même jour). Est nouveau ce qui a été **ajouté à Immich** après une date (`createdAt`, jour à l'heure du conteneur) : une étape dont toutes les photos sont nouvelles est une **nouvelle étape**, sinon **« +n photos »** ; une nouvelle photo prise avant cette date est **« retrouvée »** (scans, archives). Les 6 étapes les plus fournies sont nommées, le reste résumé (« et n photos dans m autres étapes »). Calcul à la lecture, sans historique.
+- **Pour Julien** : bloc « Quoi de neuf · 30 derniers jours » en haut de la liste des sillages (personnes de carnet, sillages préparés ; `GET /api/nouveautes`). Toucher une ligne ouvre le sillage **sur l'étape** (`#/chemin/<id>/<étape>`), les photos nouvelles marquées « Nouvelle », les étapes concernées « Nouveau » (`nouvelles` dans la réponse du chemin). La date d'ajout de chaque photo est gardée avec le sillage préparé (colonne `ajouts` de `sillage_pret`).
+- **Pour les invités** : « Du nouveau depuis votre dernier séjour » en haut de leur page : étapes de leur frise, photos ajoutées depuis la fin de leur séjour précédent (table `sejours` : personne, arrivée, fin ; l'invitation note `depuis`) ; rien au premier séjour. Identifiants de photos opaques comme le reste de la page ; toucher une ligne descend jusqu'à l'étape.
+- **Pour la Gazette (La Récidive)** : `GET /externe/nouveautes?personne=<immich>&depuis=AAAA-MM-JJ` (jeton commun, contrat 1) : `{contrat, etapes: [{nom, annee, debut, photos, nombre, nouvelle, retrouvee}], autres_photos, autres_etapes}` ; mêmes photos que la frise d'un invité seul.
+- Limites : une photo renvoyée dans Immich (réimport, migration) paraît nouvelle ; une photo dont le visage est reconnu plus tard n'est pas nouvelle (sa date d'ajout est ancienne). Jamais essayé sur la vraie installation (présence de `createdAt` dans la version d'Immich installée à vérifier).
+- Tests : `tests/test_nouveautes.py` (5), deux tests d'écran.
+
 ## 0.25.1 — 27 novembre 2026 (réfection complète le mardi)
 
 - Les sillages préparés sont **tous refaits dans la nuit du mardi** (choix de Julien, 27/11/2026) au lieu du dimanche ; les autres nuits, vérification par empreinte comme avant (`JOUR_REFECTION`). Phrase de Réglages mise à jour. Jamais essayé sur la vraie installation.

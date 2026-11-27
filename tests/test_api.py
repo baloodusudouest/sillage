@@ -377,7 +377,7 @@ def test_personne_trouvee_le_mot_d_accueil(monde):
     assert r["trouves"] == [] and r["chemin"]
     inv = client.get("/api" + r["chemin"]).json()
     assert inv == {"invites": ["Personne INCONNUE"], "commun": None, "chacun": [], "accueil": True,
-                   "aidez": [], "signalements": {}, "photos_redatees": 0}
+                   "aidez": [], "signalements": {}, "photos_redatees": 0, "nouveautes": None}
 
 
 def test_invitation_expiree(monde):
