@@ -1,5 +1,10 @@
 # Journal des versions
 
+## 0.26.6 — 27 novembre 2026 (arbre des invités : le nom de famille partout)
+
+- **Arbre des invités : le nom de famille est toujours montré** (demande de Julien, 27/11/2026), aussi pour un mineur ou une personne sans date de naissance (avant : prénom seul). Inchangé : ni visage ni date pour eux ; une personne cochée « jamais aux invités » dans carnet reste un point sans nom. La règle de vie privée du conseil du 27/11/2026 est assouplie sur ce point par Julien.
+- Tests revus. Jamais essayé sur la vraie installation.
+
 ## 0.26.5 — 27 novembre 2026 (« nouveau » = entré dans le sillage)
 
 - **Constaté le 27/11/2026 sur la vraie installation** (essai SIL-18) : les 21 photos envoyées dans Immich ce jour-là n'avaient encore **aucun visage nommé** (reconnaissance faciale d'Immich pas encore passée) : elles n'étaient dans le sillage de personne, donc pas dans « Quoi de neuf ». Et le « J'ai vu » touché à 18:06 les aurait cachées une fois reconnues, car elles avaient été envoyées avant.

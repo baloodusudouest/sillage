@@ -456,7 +456,7 @@ def test_022_arbre_de_l_invite_et_proposition(page):
     page.get_by_role("button", name="Liste").click()
     panneau = page.locator(".panneau")
     noms = panneau.locator("button > span:first-child").all_inner_texts()
-    assert "Léa" in noms and "Léa MARCHAND" not in noms                               # mineure : prénom seulement
+    assert "Léa MARCHAND" in noms                                                     # 0.26.6 : mineure, nom de famille aussi
     assert "Personne non montrée" in noms                                             # case « jamais aux invités »
     panneau.get_by_role("button", name=re.compile("^Léa")).click()
     carte = page.locator(".carte")

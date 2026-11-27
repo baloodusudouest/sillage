@@ -7,7 +7,8 @@ Pour un invité, tout est décidé ici, côté serveur (règle du conseil du 27/
 caché n'est jamais envoyé au navigateur.
 - personne décédée (date de décès connue, ou décès sans date), ou née il y a plus de 100 ans : nom, visage et dates ;
 - personne vivante majeure : nom, visage, année de naissance seulement ;
-- personne mineure, ou dont l'âge n'est pas connu (aucune date) : prénom seulement, ni visage ni date ;
+- personne mineure, ou dont l'âge n'est pas connu (aucune date) : prénom et nom (0.26.6, choix de Julien du 27/11/2026 ;
+  prénom seul avant), ni visage ni date ;
 - case « jamais aux invités » cochée dans carnet : rien (un point sans nom), ses liens restent pour que l'arbre tienne.
 Les identifiants de Treemich et de carnet ne sortent jamais vers un invité : chaque personne y a un identifiant opaque.
 """

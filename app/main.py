@@ -1470,7 +1470,7 @@ def arbre_invite(jeton: str):
             a = A.annee(p.get("naissance"))
             sortie.update(nom=p.get("nom") or "", naissance=str(a) if a else "", visage=bool(immich))
         elif st in ("mineur", "inconnu"):
-            sortie["nom"] = A.prenom(p.get("nom") or "")
+            sortie["nom"] = p.get("nom") or ""         # 0.26.6 (Julien) : nom de famille aussi ; ni visage ni date
         if sortie["visage"]:
             visages[op] = immich
         gens.append(sortie)

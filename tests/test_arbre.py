@@ -160,12 +160,12 @@ def test_arbre_des_invites_masque_cote_serveur(monde, carnet):
     cam = par["vivant:Camille ROUSSEL"]
     assert cam["invite"] and cam["naissance"] == "1987" and cam["visage"] and a["depart"] == cam["id"]
     assert par["vivant:Hugo MARCHAND"]["naissance"] == "1985"
-    lea = par["mineur:Léa"]
+    lea = par["mineur:Léa MARCHAND"]                       # 0.26.6 : nom de famille aussi
     assert lea["naissance"] == "" and lea["visage"] is False
     mamie = par["decede:Rose ROUSSEL"]
     assert mamie["naissance"] == "1930-01-01" and mamie["deces"] == "2010-02-02" and mamie["decede"]
     assert par["decede:Jules ROUSSEL"]["naissance"] == "1890"           # né il y a plus de 100 ans
-    assert par["inconnu:Paul"]["naissance"] == "" and not par["inconnu:Paul"]["visage"]
+    assert par["inconnu:Paul ROUSSEL"]["naissance"] == "" and not par["inconnu:Paul ROUSSEL"]["visage"]
     masque = par["masque:"]
     assert masque["genre"] == "" and not masque["visage"] and masque["naissance"] == ""
     assert a["invites"] == [{"id": cam["id"], "prenom": "Camille"}]
@@ -207,15 +207,15 @@ def test_propositions_envoyees_a_carnet(monde, carnet):
     assert envoi["personne"] == "t-mamie" and envoi["nom"] == "Rose ROUSSEL" and envoi["valeur"] == "1930-01-04"
     assert envoi["mot"] == "née un samedi" and envoi["invites"] == ["Camille"] and envoi["sejour"]["du"] == date.today().isoformat()
     # Un lien manquant vers une autre personne de l'arbre (vrais noms côté carnet seulement)
-    client.post(url, json={"personne": par["Léa"]["id"], "type": "lien", "lien": "parent", "autre": par["Hugo MARCHAND"]["id"],
+    client.post(url, json={"personne": par["Léa MARCHAND"]["id"], "type": "lien", "lien": "parent", "autre": par["Hugo MARCHAND"]["id"],
                            "mot": "Hugo est son père"})
     assert carnet.recues[-1]["autre"] == "t-hugo" and carnet.recues[-1]["nom"] == "Léa MARCHAND"
     # Refus
     for mauvais in ({"personne": "000000000000000000000000", "type": "date", "champ": "naissance", "valeur": "1930"},
-                    {"personne": par["Léa"]["id"], "type": "date", "champ": "naissance", "valeur": "le 4"},
-                    {"personne": par["Léa"]["id"], "type": "nom", "champ": "prenom", "valeur": ""},
-                    {"personne": par["Léa"]["id"], "type": "lien", "lien": "cousin", "mot": "x"},
-                    {"personne": par["Léa"]["id"], "type": "personne", "mot": ""}):
+                    {"personne": par["Léa MARCHAND"]["id"], "type": "date", "champ": "naissance", "valeur": "le 4"},
+                    {"personne": par["Léa MARCHAND"]["id"], "type": "nom", "champ": "prenom", "valeur": ""},
+                    {"personne": par["Léa MARCHAND"]["id"], "type": "lien", "lien": "cousin", "mot": "x"},
+                    {"personne": par["Léa MARCHAND"]["id"], "type": "personne", "mot": ""}):
         assert client.post(url, json=mauvais).status_code in (404, 422), mauvais
 
 
