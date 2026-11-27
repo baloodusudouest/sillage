@@ -139,3 +139,25 @@ def test_invite_du_nouveau_depuis_son_dernier_sejour(monde):
 def _attendre():
     for fil in list(main.ETAT["fond"]):
         fil.join(timeout=10)
+
+
+def test_j_ai_vu(monde, monkeypatch):
+    """0.26.4 : « J'ai vu » cache ce qui est déjà arrivé (partout) ; une arrivée suivante revient."""
+    client, faux_ = monde
+    _entrer(client)
+    monkeypatch.setattr(main, "PAUSE_SILLAGES", 0)
+    _anciennes(faux_)
+    _arrivees(faux_)
+    _carnet()
+    client.post("/api/sillages/preparer")
+    _finir()
+    assert len(client.get("/api/nouveautes").json()["personnes"]) == 1
+    r = client.post("/api/nouveautes/vu").json()
+    assert r["ok"] and r["vu_le"]
+    j = client.get("/api/nouveautes").json()
+    assert j["personnes"] == [] and j["vu_le"] == r["vu_le"]
+    assert client.get(f"/api/chemin/{CAMILLE}").json()["nouvelles"] == []             # plus marquées non plus
+    faux_.photos[CAMILLE].append(photo("demain", f"{_jour(1)}T10:00:00", "2026/Après", createdAt=_ajoutee(-1)))
+    client.get(f"/api/chemin/{CAMILLE}/verifier")
+    p = client.get("/api/nouveautes").json()["personnes"]
+    assert len(p) == 1 and sum(e["photos"] for e in p[0]["etapes"]) == 1

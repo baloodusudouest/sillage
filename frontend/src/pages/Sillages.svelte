@@ -2,6 +2,7 @@
   // L'écran d'ouverture : les personnes nommées d'Immich. Toucher une personne ouvre son chemin.
   import { onMount } from 'svelte'
   import Search from '@lucide/svelte/icons/search'
+  import Check from '@lucide/svelte/icons/check'
   import { api } from '$lib/api.js'
 
   let { ondeconnecte } = $props()
@@ -31,6 +32,14 @@
   const quandAjout = (j) => {
     const n = Math.round((new Date(new Date().toDateString()) - new Date(j + 'T00:00:00')) / 86400000)
     return n <= 0 ? 'aujourd\'hui' : n === 1 ? 'hier' : 'il y a ' + n + ' jours'
+  }
+
+  // 0.26.4 : « J'ai vu » : le bloc se ferme ; il reviendra avec les prochaines arrivées (sur tous les appareils)
+  let vuEnCours = $state(false)
+  async function jAiVu() {
+    vuEnCours = true
+    try { await api.post('/api/nouveautes/vu'); neuf = null } catch { /* Sillage muet : le bloc reste */ }
+    vuEnCours = false
   }
 
   onMount(async () => {
@@ -67,7 +76,10 @@
   {/if}
   {#if neuf?.personnes?.length && !cherche.trim() && !aVerifier}
     <section class="neuf" aria-labelledby="titre-neuf">
-      <h2 id="titre-neuf" class="etiquette">Quoi de neuf · {neuf.jours} derniers jours</h2>
+      <div class="tete">
+        <h2 id="titre-neuf" class="etiquette">Quoi de neuf · {neuf.vu_le ? 'depuis ta dernière lecture' : neuf.jours + ' derniers jours'}</h2>
+        <button type="button" class="vu" onclick={jAiVu} disabled={vuEnCours}><Check class="size-4" aria-hidden="true" />J'ai vu</button>
+      </div>
       <ul>
         {#each neuf.personnes as p (p.personne)}
           <li>
@@ -109,6 +121,10 @@
 
 <style>
   .neuf { margin-bottom: 1rem; padding: 0.9rem 1.1rem; border: 1px solid var(--border); border-left: 4px solid var(--app); border-radius: 1rem; background: var(--card); }
+  .neuf .tete { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; }
+  .vu { display: inline-flex; align-items: center; gap: 0.35rem; min-height: 2.25rem; padding: 0 0.85rem; border: 1px solid var(--border);
+        border-radius: 999px; background: transparent; color: var(--foreground); font-size: 0.85rem; cursor: pointer; }
+  .vu:hover { border-color: var(--app); }
   .neuf > ul { display: grid; gap: 0.8rem; margin-top: 0.6rem; }
   .neuf > ul > li { display: flex; gap: 0.75rem; align-items: flex-start; }
   .neuf img { width: 2.6rem; height: 2.6rem; flex: none; border-radius: 50%; object-fit: cover; background: var(--secondary); }

@@ -503,6 +503,12 @@ def test_026_quoi_de_neuf_du_proprietaire(page):
     assert page.locator(".galerie .neuve").count() == 2
     assert page.locator(".etape .neuf").count() >= 1
     page.keyboard.press("Escape")
+    # 0.26.4 : « J'ai vu » ferme le bloc
+    page.route("**/api/nouveautes/vu", lambda r: r.fulfill(status=200, content_type="application/json", body='{"ok": true}'))
+    page.goto(page.base + "/#/sillages")
+    page.locator("section.neuf").get_by_role("button", name="J'ai vu").click()
+    page.locator("section.neuf").wait_for(state="detached")
+    page.unroute("**/api/nouveautes/vu")
     page.unroute("**/api/nouveautes")
     page.unroute(f"**/api/chemin/{CAMILLE}")
 

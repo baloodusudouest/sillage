@@ -425,13 +425,19 @@ NOUVEAUTES_MAX = 6           # étapes nommées une à une ; au-delà : « et n 
 
 
 def _jour_local(texte: str) -> str:
-    """Le jour (heure du conteneur) d'une date d'Immich en UTC (« 2026-11-27T23:30:00.000Z » → « 2026-11-28 » à Paris)."""
+    """Le moment (heure du conteneur, à la seconde) d'une date d'Immich en UTC (« 2026-11-27T23:30:00.000Z » →
+    « 2026-11-28T00:30:00 » à Paris). 0.26.4 : à la seconde (avant : le jour), pour « J'ai vu »."""
     if not texte:
         return ""
     try:
-        return datetime.fromisoformat(texte.replace("Z", "+00:00")).astimezone().date().isoformat()
+        return datetime.fromisoformat(texte.replace("Z", "+00:00")).astimezone().replace(tzinfo=None).isoformat(timespec="seconds")
     except ValueError:
-        return texte[:10]
+        return texte[:19]
+
+
+def _seuil(depuis: str) -> str:
+    """Un jour veut dire « après ce jour » (fin de journée) ; un moment se compare tel quel."""
+    return depuis if "T" in depuis else depuis + "T23:59:59"
 
 
 def _ajouts(photos: list[dict]) -> dict[str, str]:
@@ -449,13 +455,14 @@ def _nouveautes(etapes: list[dict], ajouts: dict[str, str], depuis: str, photos_
         if e.get("masquee"):
             continue
         ids = [p["id"] if isinstance(p, dict) else p for p in (photos_de(e) if photos_de else e.get("photos") or [])]
-        neuves = [i for i in ids if (ajouts.get(i) or "") > depuis]
+        seuil = _seuil(depuis)
+        neuves = [i for i in ids if (ajouts.get(i) or "") > seuil]
         if not neuves:
             continue
         liste.append({"cle": e["cle"], "nom": e.get("nom") or "", "debut": e["debut"], "fin": e.get("fin") or e["debut"],
                       "photos": len(neuves), "nombre": len(ids), "nouvelle": len(neuves) == len(ids),
-                      "retrouvee": (e.get("fin") or e["debut"]) < depuis, "phare": e.get("phare"),
-                      "nouvelles": neuves, "ajoutee_le": max(ajouts[i] for i in neuves)})
+                      "retrouvee": (e.get("fin") or e["debut"]) < depuis[:10], "phare": e.get("phare"),
+                      "nouvelles": neuves, "ajoutee_le": max(ajouts[i] for i in neuves)[:10]})
     liste.sort(key=lambda n: (-n["photos"], n["debut"]))
     reste = liste[NOUVEAUTES_MAX:]
     return {"etapes": liste[:NOUVEAUTES_MAX], "autres_photos": sum(n["photos"] for n in reste), "autres_etapes": len(reste)}
@@ -465,9 +472,14 @@ def _depuis_jours(jours: int) -> str:
     return (date.today() - timedelta(days=jours)).isoformat()
 
 
+def _depuis_julien() -> str:
+    """0.26.4 : 30 jours, ou depuis le dernier « J'ai vu » de Julien s'il est plus récent."""
+    return max(_depuis_jours(NOUVEAUTES_JOURS), ETAT["base"].reglage("nouveautes_vues_le", "") or "")
+
+
 def _recentes(ajouts: dict[str, str]) -> list[str]:
-    """Les photos ajoutées à Immich dans les 30 derniers jours (marquées « nouvelle » dans le chemin)."""
-    d = _depuis_jours(NOUVEAUTES_JOURS)
+    """Les photos ajoutées à Immich depuis 30 jours (ou le dernier « J'ai vu ») : marquées « nouvelle » dans le chemin."""
+    d = _seuil(_depuis_julien())
     return sorted(i for i, j in ajouts.items() if j and j > d)
 
 
@@ -521,7 +533,7 @@ def chemin(personne: str, request: Request, frais: bool = False):
 def nouveautes():
     """0.26 : « Quoi de neuf » de Julien : les sillages préparés (personnes de carnet) qui ont des photos ajoutées à
     Immich depuis 30 jours, les plus récents d'abord."""
-    depuis = _depuis_jours(NOUVEAUTES_JOURS)
+    depuis = _depuis_julien()
     try:
         gens = _personnes()
     except Exception:
@@ -537,7 +549,17 @@ def nouveautes():
                            "ajoutee_le": max(e["ajoutee_le"] for e in n["etapes"]),
                            "etapes": [{k: v for k, v in e.items() if k != "nouvelles"} for e in n["etapes"]]})
     sortie.sort(key=lambda x: x["ajoutee_le"], reverse=True)
-    return {"depuis": depuis, "jours": NOUVEAUTES_JOURS, "personnes": sortie}
+    return {"depuis": depuis, "jours": NOUVEAUTES_JOURS, "vu_le": ETAT["base"].reglage("nouveautes_vues_le", "") or None,
+            "personnes": sortie}
+
+
+@app.post("/api/nouveautes/vu")
+def nouveautes_vues():
+    """0.26.4 : « J'ai vu » : ce qui est arrivé jusqu'ici n'est plus montré (sur tous les appareils) ; les prochaines
+    arrivées reviendront dans « Quoi de neuf »."""
+    le = datetime.now().isoformat(timespec="seconds")
+    ETAT["base"].poser_reglage("nouveautes_vues_le", le)
+    return {"ok": True, "vu_le": le}
 
 
 @app.get("/externe/nouveautes")

@@ -1,5 +1,11 @@
 # Journal des versions
 
+## 0.26.4 — 27 novembre 2026 (« J'ai vu » dans Quoi de neuf)
+
+- **Bouton « J'ai vu »** en haut du bloc « Quoi de neuf » (demande de Julien, 27/11/2026) : le bloc se ferme et ce qui est déjà arrivé n'est plus montré, sur tous les appareils (`POST /api/nouveautes/vu`, réglage `nouveautes_vues_le` dans la base) ; les marques « Nouvelle » du chemin suivent. Les arrivées suivantes reviennent, sous « Quoi de neuf · depuis ta dernière lecture ».
+- La date d'ajout des photos est gardée à la seconde (avant : au jour) ; un jour comme « depuis » veut dire « après ce jour ». Les sillages déjà préparés gardent leurs dates au jour jusqu'à leur prochaine préparation (au plus tard la nuit du mardi).
+- Tests : `test_j_ai_vu`, test d'écran complété. Jamais essayé sur la vraie installation.
+
 ## 0.26.3 — 27 novembre 2026 (plus de pavé sur l'arbre pendant « Lien avec… »)
 
 - **Le pavé du lien est retiré** (demande de Julien, 27/11/2026) : il cachait une grande partie de la vue. Il reste deux boutons en bas, **Voir à plat** (pas dans l'arbre à plat) et **Fermer** ; le lien se lit sur les cartes de l'arbre (« Fille de cousin »…) et reste dit au lecteur d'écran.
