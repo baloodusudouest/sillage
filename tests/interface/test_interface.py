@@ -371,24 +371,26 @@ def _connecte(page, adresse):
 
 
 def test_022_arbre_du_proprietaire(page):
-    """0.23 : cinq vues (Éventail, Sablier, Arbre, Vie 3D, Hélice ; plus de constellation), carte d'une personne, et
-    « Lien avec… » qui dit le lien et l'écrit en étapes."""
+    """0.24 : trois vues (Vie 3D à l'ouverture, avec « Proches » ou « Tout l'arbre » ; Éventail ; Arbre), carte d'une
+    personne, et « Lien avec… » qui dit le lien et l'écrit en étapes."""
     _connecte(page, "/#/chemin/" + CAMILLE)
     page.wait_for_selector(".etape")
     page.get_by_role("button", name="Voir son arbre de famille").click()
     page.get_by_role("dialog", name="L'arbre de Camille ROUSSEL").wait_for()
     if page.get_by_role("button", name="Compris").count():
         page.get_by_role("button", name="Compris").click()
-    assert page.get_by_role("button", name="Constellation").count() == 0
-    page.locator("svg.plan .personne").first.wait_for()                              # éventail à plat par défaut
-    for vue in ("Vie 3D", "Hélice"):
-        page.get_by_role("button", name=vue, exact=True).click()
-        page.locator(".arbre canvas").wait_for()
-        assert page.get_by_role("button", name=vue, exact=True).get_attribute("aria-pressed") == "true"
-    for vue in ("Sablier", "Arbre"):
+    for retiree in ("Constellation", "Sablier", "Hélice"):
+        assert page.get_by_role("button", name=retiree, exact=True).count() == 0
+    page.locator(".arbre canvas").wait_for()                                          # Vie 3D d'emblée
+    assert page.get_by_role("button", name="Vie 3D", exact=True).get_attribute("aria-pressed") == "true"
+    page.get_by_role("button", name="Tout l'arbre").click()
+    assert page.get_by_role("button", name="Tout l'arbre").get_attribute("aria-pressed") == "true"
+    assert page.evaluate("localStorage.getItem('sillage-arbre-vie-tout')") == "1"
+    page.get_by_role("button", name="Proches").click()
+    for vue in ("Éventail", "Arbre"):
         page.get_by_role("button", name=vue, exact=True).click()
         page.locator("svg.plan .personne").first.wait_for()
-    assert page.evaluate("localStorage.getItem('sillage-arbre-vue')") == "complet"
+    assert page.get_by_role("button", name="Proches").count() == 0                   # seulement en Vie 3D
     page.get_by_role("button", name="Liste").click()
     page.locator(".panneau").get_by_role("button", name=re.compile("Hugo MARCHAND")).click()
     carte = page.locator(".carte")

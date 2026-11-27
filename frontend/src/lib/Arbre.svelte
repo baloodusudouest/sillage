@@ -1,6 +1,6 @@
 <script>
-  // L'arbre de famille, en plein écran par-dessus le chemin (0.22). 0.23 : cinq vues validées par Julien le 27/11/2026
-  // — à plat : Éventail, Sablier, Arbre (complet) ; en 3D : Arbre de vie, Hélice (la constellation est retirée) — et le
+  // L'arbre de famille, en plein écran par-dessus le chemin (0.22). 0.24 (Julien, 27/11/2026) : trois vues — Vie 3D
+  // (ouverte d'emblée ; « Proches » ou « Tout l'arbre »), Éventail et Arbre (complet) ; sablier et hélice retirés — et le
   // champ « Lien avec… » : une deuxième personne, le lien en clair, le chemin qui s'allume sur l'arbre (par le sang
   // d'abord, sinon par les couples), les étapes écrites dessous.
   // Toucher une personne : elle passe au centre et sa carte s'ouvre. Propriétaire : « Voir son sillage », « Ouvrir dans
@@ -17,13 +17,11 @@
   // invite : { jeton } pour un invité ; null pour le propriétaire
 
   const VUES = [
-    { cle: 'eventail', nom: 'Éventail', plat: true },
-    { cle: 'sablier', nom: 'Sablier', plat: true },
-    { cle: 'complet', nom: 'Arbre', plat: true },
     { cle: 'vie', nom: 'Vie 3D', plat: false },
-    { cle: 'helice', nom: 'Hélice', plat: false },
+    { cle: 'eventail', nom: 'Éventail', plat: true },
+    { cle: 'complet', nom: 'Arbre', plat: true },
   ]
-  const CLE_VUE = 'sillage-arbre-vue'
+  const CLE_TOUT = 'sillage-arbre-vie-tout'
   const CLE_AIDE = 'sillage-arbre-aide-2'
   const lireStock = (k) => { try { return localStorage.getItem(k) } catch { return null } }
   const ecrireStock = (k, v) => { try { localStorage.setItem(k, v) } catch { /* navigation privée */ } }
@@ -40,8 +38,9 @@
 
   let svgEl = $state(null)
   let boite = $state(null)
-  let moteur = null                         // vues à plat, arbre de vie ou hélice
-  let vue = $state(VUES.some((v) => v.cle === lireStock(CLE_VUE)) ? lireStock(CLE_VUE) : 'eventail')
+  let moteur = null                         // vues à plat ou arbre de vie
+  let vue = $state('vie')                   // 0.24 : l'arbre s'ouvre toujours sur la Vie 3D (éventail sans WebGL)
+  let tout = $state(lireStock(CLE_TOUT) === '1')   // Vie 3D : « Tout l'arbre » plutôt que « Proches »
   let avec3d = $state(true)
   let centre = $state(arbre.depart)         // la personne au centre de la vue
   let reference = $state(arbre.depart)      // d'où se lisent les liens des cartes (la personne de départ, ou l'invité choisi)
@@ -57,9 +56,9 @@
   let cherche = $state('')
   let cible = $state(null)                  // « Lien avec… » : la deuxième personne
 
-  // 0.23.1 : un chemin que la vue ne peut pas montrer en entier (éventail, sablier, arbre de vie) s'affiche en schéma
+  // 0.23.1 : un chemin que la vue ne peut pas montrer en entier (éventail, arbre de vie) s'affiche en schéma
   // de parenté, de la personne au centre jusqu'à la personne cherchée
-  const schema = $derived(!!cible && !['complet', 'helice'].includes(vue))
+  const schema = $derived(!!cible && vue !== 'complet')
   const plat = $derived(VUES.find((v) => v.cle === vue)?.plat || schema)
   const titre = $derived(invite ? 'Votre arbre de famille' : `L'arbre de ${nomDe(parId.get(arbre.depart))}`)
   const lien = $derived(choisie ? parente(ix, reference, choisie.id) : '')
@@ -101,16 +100,11 @@
       return
     }
     const quoi = vue
-    const { webglPossible } = await import('$lib/arbre/scene.js')
-    if (!webglPossible()) { avec3d = false; vue = 'eventail'; return monter() }
-    const module = quoi === 'vie' ? await import('$lib/arbre/vie.js') : await import('$lib/arbre/scene.js')
+    const module = await import('$lib/arbre/vie.js')
+    if (!module.webglPossible()) { avec3d = false; vue = 'eventail'; return monter() }
     if (quoi !== vue) return
     try {
-      if (quoi === 'vie') {
-        moteur = { sorte: 'vie', m: module.creerVie(boite, fam, { lienDe: (id) => (id === centre ? '' : parente(ix, centre, id)), surChoix: surChoix3d }) }
-      } else {
-        moteur = { sorte: 'helice', m: module.creerScene(boite, donnees, { surChoix: (p, q) => surChoix3d(p?.id ?? null, q) }) }
-      }
+      moteur = { sorte: 'vie', m: module.creerVie(boite, fam, { lienDe: (id) => (id === centre ? '' : parente(ix, centre, id)), surChoix: surChoix3d }) }
       dessiner()
       pret = true
     } catch { avec3d = false; vue = 'eventail'; monter() }
@@ -120,8 +114,7 @@
     if (moteur.sorte === 'plat') dessines = schema && ch
       ? moteur.m.dessiner('chemin', centre, sur, false, { ch, lienDe: (id) => parente(ix, centre, id) })
       : moteur.m.dessiner(schema ? 'complet' : vue, centre, sur, garderCadre)
-    else if (moteur.sorte === 'vie') dessines = moteur.m.montrer(centre, sur)
-    else { moteur.m.surligner(sur); dessines = new Set(arbre.personnes.map((p) => p.id)) }
+    else dessines = moteur.m.montrer(centre, sur, tout)
   }
   function surChoix3d(id, quoi) {
     if (quoi === 'perdu') { perdu = true; return }
@@ -137,7 +130,6 @@
     formulaire = null
     envoi = { attente: false, message: '', erreur: '' }
     fermerAide()
-    if (moteur?.sorte === 'helice') { moteur.m.choisir(id); return }
     if (id !== centre) { centre = id; dessiner() }
   }
   function basculer(v) {
@@ -145,13 +137,13 @@
     vue = v
     choisie = null
     formulaire = null
-    ecrireStock(CLE_VUE, v)
     monter()
   }
   function fermerAide() { aide = false; ecrireStock(CLE_AIDE, 'vu') }
-  function fermerCarte() { choisie = null; formulaire = null; if (moteur?.sorte === 'helice') moteur.m.relacher() }
+  function fermerCarte() { choisie = null; formulaire = null }
+  function etendue(v) { if (v === tout) return; tout = v; ecrireStock(CLE_TOUT, v ? '1' : '0'); choisie = null; dessiner() }
   function revenir() { centre = reference; choisie = null; dessiner() }
-  function recentrer(id) { reference = id; centre = id; choisie = null; dessiner(); if (moteur?.sorte === 'helice') moteur.m.choisir(id) }
+  function recentrer(id) { reference = id; centre = id; choisie = null; dessiner() }
   function ouvrirPanneau(quoi) { panneau = panneau === quoi ? null : quoi; cherche = '' }
   function depuisListe(p) {
     if (matchMedia('(max-width: 640px)').matches) panneau = null
@@ -164,7 +156,7 @@
     choisie = null
     await tick()
     if (schema !== avant || (schema && moteur?.sorte !== 'plat')) monter()
-    else dessiner(vue === 'helice')
+    else dessiner()
   }
   async function effacerLien() {
     const avant = schema
@@ -181,8 +173,7 @@
       if (m.endsWith(fin)) return m.slice(0, -fin.length) + dit + prenom
     return m + ' de ' + prenom
   }
-  function voirComplet() { vue = 'complet'; ecrireStock(CLE_VUE, 'complet'); monter() }
-  // Changer de vue pendant un chemin : le schéma reste pour éventail, sablier et arbre de vie
+  function voirComplet() { vue = 'complet'; monter() }
 
   const trouves = $derived.by(() => {
     const t = cherche.trim().toLowerCase()
@@ -251,7 +242,13 @@
     <div class="outils">
       <div class="verre bascule"><button type="button" aria-pressed={panneau === 'lien'} onclick={() => ouvrirPanneau('lien')}>Lien avec…</button></div>
       <div class="verre bascule"><button type="button" aria-pressed={panneau === 'liste'} onclick={() => ouvrirPanneau('liste')}>Liste</button></div>
-      {#if centre !== reference && vue !== 'helice'}
+      {#if vue === 'vie' && !schema}
+        <div class="verre vues" role="group" aria-label="Personnes montrées">
+          <button type="button" aria-pressed={!tout} onclick={() => etendue(false)}>Proches</button>
+          <button type="button" aria-pressed={tout} onclick={() => etendue(true)}>Tout l'arbre</button>
+        </div>
+      {/if}
+      {#if centre !== reference}
         <div class="verre bascule"><button type="button" onclick={revenir}>Revenir à {prenomDe(reference)}</button></div>
       {/if}
     </div>

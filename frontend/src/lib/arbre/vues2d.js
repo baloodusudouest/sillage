@@ -1,7 +1,7 @@
-// 0.23 : les trois vues à plat de l'arbre (SVG) : éventail, sablier, arbre complet. Prototypes validés par Julien le
+// 0.23 : les vues à plat de l'arbre (SVG) : éventail, arbre complet (sablier retiré en 0.24, mise en page dans famille.js). Prototypes validés par Julien le
 // 27/11/2026. Glisser pour se déplacer, pincer (ou molette) pour zoomer, toucher une personne : `surChoix(id)`.
 // `surligne` ({ ids, aretes }) : le chemin entre deux personnes brille, le reste s'estompe.
-import { annees, initiales, masquee, prenomNom, teinte } from './famille.js'
+import { miseEnPage, annees, initiales, masquee, prenomNom, teinte } from './famille.js'
 
 const NS = 'http://www.w3.org/2000/svg'
 
@@ -99,90 +99,40 @@ export function creerVues2D(svg, fam, { surChoix = () => {} } = {}) {
     return { x: -230, y: -(r0 + G * w) - 10, w: 460, h: r0 + G * w + y + 20 }
   }
 
-  // ---------------------------------------------------------------- sablier
-  function sablier(c) {
-    const W = 136, H = 84, G = 3
-    const niv = [[c]]
-    for (let g = 1; g <= G; g++) niv.push(niv[g - 1].flatMap((x) => (x ? fam.pereMere(x) : [null, null])))
-    const largeur = 2 ** G * W, pos = new Map()
-    for (let g = 1; g <= G; g++) niv[g].forEach((id, k) => { if (id) pos.set(id, [-largeur / 2 + (k + 0.5) * (largeur / 2 ** g), -g * H]) })
-    for (let g = 0; g < G; g++) niv[g].forEach((id, k) => {
-      if (!id) return
-      const x = g === 0 ? 0 : pos.get(id)[0], y = -g * H, ps = [niv[g + 1][2 * k], niv[g + 1][2 * k + 1]].filter(Boolean)
-      if (!ps.length) return
-      const ym = y - H / 2, xs = ps.map((q) => pos.get(q)[0])
-      const lum = ps.some((q) => brille(id, q))
-      ligne(`M${x},${y - 27} V${ym} M${Math.min(...xs, x)},${ym} H${Math.max(...xs, x)}`, { lum, faible: surligne && !lum })
-      for (const q of ps) ligne(`M${pos.get(q)[0]},${ym} V${pos.get(q)[1] + 27}`, { lum: brille(id, q), faible: surligne && !brille(id, q) })
-    })
-    for (const [id, [x, y]] of pos) carte(x, y, id, { w: W - 12 })
-    const fr = fam.fratrie(c), cj = fam.conjoints(c)
-    fr.forEach((id, i) => { const x = -(i + 1) * W - 20; ligne(`M${x},-27 V${-H / 2}`, { couleur: 'rgba(169,143,216,.35)', lum: brille(c, id) }); carte(x, 0, id, { w: W - 12 }) })
-    if (fr.length) ligne(`M${-fr.length * W - 20},${-H / 2} H0`, { couleur: 'rgba(169,143,216,.35)', lum: fr.some((id) => brille(c, id)) })
-    carte(0, 0, c, { w: W - 12, centre: true })
-    cj.forEach((id, i) => { const x = (i + 1) * W; ligne(`M${x - W + (W - 12) / 2},0 H${x - (W - 12) / 2}`, { couleur: '#c9d1dc', tirets: fam.ex(c, id), lum: brille(c, id) }); carte(x, 0, id, { w: W - 12 }) })
-    const ens = fam.enfants(c), tot = ens.length * W, mx = cj.length ? W / 2 : 0
-    if (ens.length) ligne(`M${mx},0 V${H / 2} M${-tot / 2 + W / 2 + mx},${H / 2} H${tot / 2 - W / 2 + mx}`, { lum: ens.some((e) => brille(c, e)) })
-    ens.forEach((id, i) => {
-      const x = -tot / 2 + W / 2 + i * W + mx
-      ligne(`M${x},${H / 2} V${H - 27}`, { lum: brille(c, id) }); carte(x, H, id, { w: W - 12 })
-      const pe = fam.enfants(id)
-      pe.forEach((q, j) => { const xx = x + (j - (pe.length - 1) / 2) * W; ligne(`M${x},${H + 27} V${H * 1.5} H${xx} V${2 * H - 27}`, { lum: brille(id, q) }); carte(xx, 2 * H, q, { w: W - 12 }) })
-    })
-    const gauche = Math.min(-largeur / 2, -fr.length * W - 20 - W / 2), droite = Math.max(largeur / 2, (cj.length + 0.5) * W)
-    return { x: gauche - 10, y: -G * H - 40, w: droite - gauche + 20, h: (G + 2) * H + 60, telephone: { w: 600, y: -H } }
-  }
-
   // ---------------------------------------------------------------- arbre complet
   function complet(c) {
-    const gen = new Map([[c, 0]]), f = [c]
-    while (f.length) {
-      const x = f.shift()
-      for (const p of fam.parents(x)) if (!gen.has(p)) { gen.set(p, gen.get(x) - 1); f.push(p) }
-      for (const e of fam.enfants(x)) if (!gen.has(e)) { gen.set(e, gen.get(x) + 1); f.push(e) }
-      for (const k of [...fam.conjoints(x), ...fam.fratrie(x)]) if (!gen.has(k)) { gen.set(k, gen.get(x)); f.push(k) }
-    }
-    const ids = [...gen.keys()], W = 140, H = 110, rangs = new Map()
-    for (const x of ids) (rangs.get(gen.get(x)) || rangs.set(gen.get(x), []).get(gen.get(x))).push(x)
-    const gs = [...rangs.keys()].sort((a, b) => a - b)
-    const vu = new Set(), ordre = []
-    const visiter = (x) => {
-      if (vu.has(x)) return
-      vu.add(x); ordre.push(x)
-      for (const k of fam.conjoints(x)) if (!vu.has(k)) { vu.add(k); ordre.push(k) }
-      for (const e of [...fam.enfants(x), ...fam.conjoints(x).flatMap((k) => fam.enfants(k))]) visiter(e)
-    }
-    ids.filter((x) => !fam.parents(x).length).sort((a, b) => gen.get(a) - gen.get(b)).forEach(visiter)
-    ids.forEach(visiter)
-    const rang = new Map(ordre.map((x, i) => [x, i]))
-    const X = new Map()
-    const rangee = (g) => rangs.get(g).sort((a, b) => (X.has(a) && X.has(b) ? X.get(a) - X.get(b) : rang.get(a) - rang.get(b)))
-    for (const g of gs) rangee(g).forEach((x, i) => X.set(x, i * W))
-    for (let passe = 0; passe < 12; passe++) {
-      const descend = passe % 2 === 0
-      for (const g of descend ? gs : [...gs].reverse()) {
-        const r = rangee(g)
-        const voulu = r.map((x) => {
-          const ref = (descend ? fam.parents(x) : fam.enfants(x)).filter((q) => X.has(q))
-          return ref.length ? ref.reduce((s, q) => s + X.get(q), 0) / ref.length : X.get(x)
-        })
-        r.forEach((x, i) => X.set(x, voulu[i]))
-        r.sort((a, b) => X.get(a) - X.get(b))
-        for (let i = 1; i < r.length; i++) if (X.get(r[i]) - X.get(r[i - 1]) < W) X.set(r[i], X.get(r[i - 1]) + W)
-        const moy = r.reduce((s, x, i) => s + X.get(x) - voulu[i], 0) / r.length
-        r.forEach((x) => X.set(x, X.get(x) - moy * 0.5))
-      }
-    }
+    const { ids, gen, X, W, H } = miseEnPage(fam, c)
     const Y = (x) => gen.get(x) * H, vus = new Set()
     for (const a of ids) for (const b of fam.conjoints(a)) {
       if (vus.has(b + '|' + a) || !X.has(b)) continue
       vus.add(a + '|' + b)
       ligne(`M${Math.min(X.get(a), X.get(b)) + (W - 16) / 2},${Y(a)} H${Math.max(X.get(a), X.get(b)) - (W - 16) / 2}`, { couleur: '#c9d1dc', tirets: fam.ex(a, b), lum: brille(a, b), faible: surligne && !brille(a, b) })
     }
+    // 0.24 : un trait par famille (mêmes parents) ; les barres de familles qui se recouvrent sont décalées en hauteur
+    const familles = new Map()
     for (const e of ids) {
       const ps = fam.parents(e).filter((p) => X.has(p)); if (!ps.length) continue
-      const mx = ps.reduce((s, p) => s + X.get(p), 0) / ps.length, ym = Y(e) - H / 2, lum = ps.some((p) => brille(p, e))
-      ligne(`M${mx},${Y(ps[0]) + (ps.length > 1 ? 0 : 27)} V${ym} H${X.get(e)} V${Y(e) - 27}`, { lum, faible: surligne && !lum })
+      const cle = ps.slice().sort().join('+')
+      if (!familles.has(cle)) familles.set(cle, { ps, enfants: [] })
+      familles.get(cle).enfants.push(e)
+    }
+    const parRangee = new Map()
+    for (const f of familles.values()) {
+      f.mx = f.ps.reduce((a, p) => a + X.get(p), 0) / f.ps.length
+      const xs = [f.mx, ...f.enfants.map((e) => X.get(e))]; f.g = Math.min(...xs); f.d = Math.max(...xs)
+      const r = gen.get(f.enfants[0]); (parRangee.get(r) || parRangee.set(r, []).get(r)).push(f)
+    }
+    for (const [r, fs] of parRangee) {
+      fs.sort((a, b) => a.g - b.g)
+      const fins = []
+      for (const f of fs) { let n = fins.findIndex((d) => d < f.g - 8); if (n < 0) { n = fins.length; fins.push(0) } fins[n] = f.d; f.niveau = n }
+      const nb = fins.length
+      for (const f of fs) {
+        const ym = r * H - H / 2 + (f.niveau - (nb - 1) / 2) * Math.min(9, 40 / nb)
+        const lum = f.enfants.some((e) => f.ps.some((p) => brille(p, e)))
+        ligne(`M${f.mx},${Y(f.ps[0]) + (f.ps.length > 1 ? 0 : 27)} V${ym} M${f.g},${ym} H${f.d}`, { lum, faible: surligne && !lum })
+        for (const e of f.enfants) { const l = f.ps.some((p) => brille(p, e)); ligne(`M${X.get(e)},${ym} V${Y(e) - 27}`, { lum: l, faible: surligne && !l }) }
+      }
     }
     for (const x of ids) carte(X.get(x), Y(x), x, { w: W - 16, centre: x === c })
     const xs = ids.map((x) => X.get(x)), ys = ids.map(Y)
@@ -241,7 +191,7 @@ export function creerVues2D(svg, fam, { surChoix = () => {} } = {}) {
     vb = { x, y: y - haut, w, h: h + haut }
     appliquer()
   }
-  const VUES = { eventail, sablier, complet }
+  const VUES = { eventail, complet }
   function dessiner(vue, centre, chemin = null, garderCadre = false, extra = {}) {
     surligne = chemin
     dessines = new Set()

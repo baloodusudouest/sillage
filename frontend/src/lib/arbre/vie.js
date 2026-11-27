@@ -4,12 +4,16 @@
 // descend des parents vers les enfants, lien écrit sur chaque carte. Toucher une carte : `surChoix(id)`.
 import * as THREE from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
-import { annees, initiales, masquee, prenomNom, teinte } from './famille.js'
+import { annees, initiales, masquee, miseEnPage, prenomNom, teinte } from './famille.js'
 
 const LAV = new THREE.Color('#a98fd8'), ARG = new THREE.Color('#c9d1dc'), BLANC = new THREE.Color('#e9dcff'), FOND = 0x0b0910
 const ETAGE = 6
 const RAYONS = [0, 4.5, 9, 13.5]
 const ETAGES = { 3: '↑ Arrière-grands-parents', 2: '↑ Grands-parents', 1: '↑ Parents', [-1]: '↓ Enfants', [-2]: '↓ Petits-enfants' }
+
+export function webglPossible() {
+  try { const c = document.createElement('canvas'); return !!(c.getContext('webgl2') || c.getContext('webgl')) } catch { return false }
+}
 
 export function creerVie(conteneur, fam, { lienDe = () => '', surChoix = () => {} } = {}) {
   const reduit = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -20,7 +24,7 @@ export function creerVie(conteneur, fam, { lienDe = () => '', surChoix = () => {
   const scene = new THREE.Scene(); scene.fog = new THREE.Fog(FOND, 70, 190)
   const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 500)
   const controls = new OrbitControls(camera, renderer.domElement)
-  controls.enableDamping = true; controls.minDistance = 8; controls.maxDistance = 90
+  controls.enableDamping = true; controls.minDistance = 8; controls.maxDistance = 140
   controls.minPolarAngle = 1.15; controls.maxPolarAngle = 1.9            // l'arbre ne se renverse jamais
   const monde = new THREE.Group(); scene.add(monde)
   let deco = new THREE.Group(); monde.add(deco)
@@ -102,6 +106,25 @@ export function creerVie(conteneur, fam, { lienDe = () => '', surChoix = () => {
   }
 
   // ---------------------------------------------------------------- disposition autour de la personne au centre
+  // 0.24 : « Tout l'arbre » (oncles, cousins, belle-famille…) : la mise en page de l'arbre complet enroulée sur un
+  // cylindre, un étage par génération ; la personne au centre face à l'écran.
+  function disposerTout(c) {
+    const { ids, gen, X, W } = miseEnPage(fam, c)
+    const ECH = 5.6 / W, pos = new Map(), liens = [], branches = [], etages = new Set(), rayons = new Map()
+    const xs = ids.map((x) => X.get(x)), L = (Math.max(...xs) - Math.min(...xs) + W * 2) * ECH
+    const R = Math.max(7, L / (2 * Math.PI)), x0 = X.get(c)
+    for (const id of ids) {
+      const g = -gen.get(id), a = Math.PI / 2 - ((X.get(id) - x0) * ECH) / R
+      pos.set(id, new THREE.Vector3(Math.cos(a) * R, g * ETAGE, Math.sin(a) * R)); etages.add(g); rayons.set(g, R)
+    }
+    const vus = new Set()
+    for (const id of ids) {
+      for (const e of fam.enfants(id)) if (pos.has(e)) branches.push([pos.get(id), pos.get(e), Math.abs(gen.get(e)), id, e, true])
+      for (const k of fam.conjoints(id)) if (pos.has(k) && !vus.has(k + '|' + id)) { vus.add(id + '|' + k); liens.push([id, k, fam.ex(id, k) ? 'ex' : 'couple']) }
+    }
+    return { pos, liens, branches, etages, rayons }
+  }
+
   function disposer(c) {
     const pos = new Map([[c, new THREE.Vector3(0, 0, 0)]]), liens = [], branches = [], etages = new Set([0])
     const pousser = (id, origine, azimut, g, ecart) => {
@@ -137,21 +160,22 @@ export function creerVie(conteneur, fam, { lienDe = () => '', surChoix = () => {
     deco = new THREE.Group(); monde.add(deco)
     const { branches, etages, liens } = disposition
     for (const g of etages) {
-      const R = g > 0 ? RAYONS[g] : g === 0 ? 7 : g === -1 ? 5 : 9
+      const R = disposition.rayons?.get(g) ?? (g > 0 ? RAYONS[g] : g === 0 ? 7 : g === -1 ? 5 : 9)
       const pts = []; for (let i = 0; i <= 96; i++) { const a = i / 96 * Math.PI * 2; pts.push(new THREE.Vector3(Math.cos(a) * (R + 2.5), g * ETAGE - 1.25, Math.sin(a) * (R + 2.5))) }
       deco.add(fil(pts, g >= 0 ? ARG : LAV, g === 0 ? 0.3 : 0.14))
       const p = fam.P.get(c)
-      deco.add(etiquetteEtage(g === 0 ? `Génération de ${masquee(p) ? 'cette personne' : prenomNom(p)[0]}` : ETAGES[g], g * ETAGE))
+      deco.add(etiquetteEtage(g === 0 ? `Génération de ${masquee(p) ? 'cette personne' : prenomNom(p)[0]}` : ETAGES[g] || (g > 0 ? `↑ ${g} générations au-dessus` : `↓ ${-g} générations au-dessous`), g * ETAGE))
     }
     const seve = []
-    for (const [a, b, g, x, y] of branches) {
+    for (const [a, b, g, x, y, droit] of branches) {
       const bas = a.y < b.y ? a : b, haut = a.y < b.y ? b : a
-      const milieu = new THREE.Vector3((bas.x + haut.x) * 0.3, (bas.y + haut.y) / 2, (bas.z + haut.z) * 0.3)
+      const k = droit ? 0.5 : 0.3                        // sur le cylindre, la branche ne plonge pas vers l'axe
+      const milieu = new THREE.Vector3((bas.x + haut.x) * k, (bas.y + haut.y) / 2, (bas.z + haut.z) * k)
       const courbe = new THREE.QuadraticBezierCurve3(haut, milieu, bas)
       const lum = surligne?.aretes.has(x + '|' + y)
-      deco.add(new THREE.Mesh(new THREE.TubeGeometry(courbe, 24, lum ? 0.3 : Math.max(0.07, 0.34 - Math.abs(g) * 0.07), 8),
+      deco.add(new THREE.Mesh(new THREE.TubeGeometry(courbe, 24, lum ? 0.3 : droit ? 0.07 : Math.max(0.07, 0.34 - Math.abs(g) * 0.07), 8),
         new THREE.MeshBasicMaterial({ color: lum ? BLANC : LAV.clone().lerp(ARG, Math.min(1, Math.max(0, g) / 3)), transparent: true,
-          opacity: surligne && !lum ? 0.12 : lum ? 0.95 : 0.5, blending: THREE.AdditiveBlending, depthWrite: false })))
+          opacity: surligne && !lum ? 0.12 : lum ? 0.95 : droit ? 0.35 : 0.5, blending: THREE.AdditiveBlending, depthWrite: false })))
       if (!surligne || lum) for (let k = 0; k < 3; k++) seve.push({ courbe, t: k / 3 })
     }
     for (const [a, b, sorte] of liens) {
@@ -164,11 +188,11 @@ export function creerVie(conteneur, fam, { lienDe = () => '', surChoix = () => {
     pts.userData.seve = seve; deco.add(pts)
   }
 
-  let centre = null
-  function montrer(c, chemin = null) {
-    const nouveauCentre = c !== centre
-    centre = c; surligne = chemin
-    disposition = disposer(c)
+  let centre = null, toutAvant = false
+  function montrer(c, chemin = null, tout = false) {
+    const nouveauCentre = c !== centre || tout !== toutAvant
+    centre = c; surligne = chemin; toutAvant = tout
+    disposition = tout ? disposerTout(c) : disposer(c)
     depuis = new Map([...sprites].map(([id, s]) => [id, s.position.clone()]))
     t0 = performance.now()
     for (const [id, s] of sprites) if (!disposition.pos.has(id)) { monde.remove(s); s.material.map?.dispose(); s.material.dispose(); sprites.delete(id) }
@@ -177,7 +201,10 @@ export function creerVie(conteneur, fam, { lienDe = () => '', surChoix = () => {
     if (nouveauCentre) {
       const R = Math.max(...[...disposition.pos.values()].map((v) => v.length()), 8)
       const portrait = conteneur.clientWidth < conteneur.clientHeight
-      cible = { pos: new THREE.Vector3(0, 9, R * (portrait ? 2.9 : 1.7) + 6), regard: new THREE.Vector3(0, 4, 0), t0: performance.now(), de: camera.position.clone(), deR: controls.target.clone() }
+      const Rc = disposition.rayons ? Math.max(...disposition.rayons.values()) : 0
+      cible = Rc
+        ? { pos: new THREE.Vector3(0, 7, Rc + (portrait ? 46 : 30)), regard: new THREE.Vector3(0, 1, Rc * 0.45), t0: performance.now(), de: camera.position.clone(), deR: controls.target.clone() }
+        : { pos: new THREE.Vector3(0, 9, R * (portrait ? 2.9 : 1.7) + 6), regard: new THREE.Vector3(0, 4, 0), t0: performance.now(), de: camera.position.clone(), deR: controls.target.clone() }
       monde.rotation.y = 0
     }
     return new Set(disposition.pos.keys())

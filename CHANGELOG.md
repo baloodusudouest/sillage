@@ -1,5 +1,14 @@
 # Journal des versions
 
+## 0.24.0 — 27 novembre 2026 (Vie 3D d'emblée, « Tout l'arbre », arbre complet revu)
+
+- **Trois vues** (demande de Julien, 27/11/2026) : **Vie 3D**, **Éventail**, **Arbre**. **Sablier** (trop proche de l'arbre) et **Hélice** (illisible) retirés (`lib/arbre/scene.js` supprimé).
+- **L'arbre s'ouvre toujours sur la Vie 3D** (éventail si l'appareil n'a pas la 3D).
+- **Vie 3D : « Proches » ou « Tout l'arbre »**. Proches : comme avant (ancêtres jusqu'aux arrière-grands-parents, conjoint, frères et sœurs, enfants, petits-enfants). Tout l'arbre : tout le monde (oncles, cousins, belle-famille…), la mise en page de l'arbre complet enroulée sur un cylindre, un étage par génération, la personne au centre face à l'écran. Choix gardé sur l'appareil (`sillage-arbre-vie-tout`).
+- **Arbre complet revu** (cartes qui se chevauchaient, arbre trop étalé) : « foyers » (personne et conjoints côte à côte) placés au plus près de leurs parents puis de leurs enfants sans jamais se toucher (régression isotone), la famille de sang de la personne au centre tire plus fort que la belle-famille, quatre ordres de départ essayés et le plus serré gardé, couloirs vides refermés ; un trait par famille, barres décalées quand deux familles se recouvrent. Sur un arbre réel de 56 personnes : environ 3 000 au lieu de 4 000 de large, aucune carte superposée. Mise en page partagée : `miseEnPage(fam, c)` dans `lib/arbre/famille.js`.
+- Sablier : correctif des petits-enfants superposés devenu sans objet (vue retirée).
+- Interface seulement. Tests d'écran du propriétaire revus. Jamais essayé sur la vraie installation.
+
 ## 0.23.2 — 27 novembre 2026 (« Lien avec… » : on remonte par les parents)
 
 - **Les étapes passent par les parents** (demande de Julien, 27/11/2026) : plus de « son frère » ou « sa sœur » d'un coup ; « son père Octave → sa mère Inès → sa fille Henri » quand l'arbre connaît un parent commun (la mère d'abord). Un frère ou une sœur reliés seulement par un lien « fratrie » dans Treemich restent tels quels. Le schéma montre donc le parent commun.

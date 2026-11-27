@@ -119,3 +119,129 @@ export function surlignage(ch, fam = null) {
   }
   return { ids, aretes }
 }
+
+// 0.24 : mise en page de tout l'arbre, partagée par l'arbre complet (à plat) et « Tout l'arbre » de la Vie 3D.
+// Rend { ids, gen, X, W, H } : génération de chaque personne (0 = `c`, négatif = plus ancien) et abscisse.
+// Chaque rangée est faite de « foyers » (une personne et ses conjoints de la même génération, côte à côte). L'ordre des
+// foyers suit la moyenne de leurs parents puis de leurs enfants (va-et-vient) ; leur place est la plus proche possible
+// de cette moyenne sans jamais se toucher (régression isotone). La famille de sang de `c` tire plus fort que la
+// belle-famille. Plusieurs ordres de départ sont essayés ; on garde l'arbre le plus serré aux traits les plus courts.
+export function miseEnPage(fam, c) {
+  const W = 128, H = 110, ECART = 16
+  const gen = new Map([[c, 0]]), file = [c]
+  while (file.length) {
+    const x = file.shift()
+    for (const p of fam.parents(x)) if (!gen.has(p)) { gen.set(p, gen.get(x) - 1); file.push(p) }
+    for (const e of fam.enfants(x)) if (!gen.has(e)) { gen.set(e, gen.get(x) + 1); file.push(e) }
+    for (const k of [...fam.conjoints(x), ...fam.fratrie(x)]) if (!gen.has(k)) { gen.set(k, gen.get(x)); file.push(k) }
+  }
+  const ids = [...gen.keys()]
+  const rangs = new Map()
+  for (const x of ids) (rangs.get(gen.get(x)) || rangs.set(gen.get(x), []).get(gen.get(x))).push(x)
+  const gs = [...rangs.keys()].sort((a, b) => a - b)
+
+  // famille de sang de `c` : ses ancêtres et tous leurs descendants
+  const sang = new Set(), anc = [c], ancetres = new Set([c])
+  while (anc.length) { const x = anc.pop(); for (const p of fam.parents(x)) if (!ancetres.has(p)) { ancetres.add(p); anc.push(p) } }
+  const pile = [...ancetres]
+  while (pile.length) { const x = pile.pop(); if (sang.has(x)) continue; sang.add(x); pile.push(...fam.enfants(x)) }
+
+  const largeur = (f) => f.membres.length * W
+  function essai(racines) {
+    const vu = new Set(), ordre = []
+    const visiter = (x) => {
+      if (vu.has(x)) return
+      vu.add(x); ordre.push(x)
+      for (const k of fam.conjoints(x)) if (!vu.has(k)) { vu.add(k); ordre.push(k) }
+      for (const e of [...fam.enfants(x), ...fam.conjoints(x).flatMap((k) => fam.enfants(k))]) visiter(e)
+    }
+    racines.forEach(visiter); ids.forEach(visiter)
+    const rang = new Map(ordre.map((x, i) => [x, i]))
+    // foyers : composantes des couples dans une rangée, en chaîne (ex-conjoint, personne, conjoint)
+    const foyers = new Map()
+    for (const g of gs) {
+      const pris = new Set(), liste = []
+      for (const x of rangs.get(g).slice().sort((a, b) => rang.get(a) - rang.get(b))) {
+        if (pris.has(x)) continue
+        const groupe = [], p2 = [x]
+        while (p2.length) { const y = p2.pop(); if (pris.has(y)) continue; pris.add(y); groupe.push(y)
+          for (const k of fam.conjoints(y)) if (gen.get(k) === g && !pris.has(k)) p2.push(k) }
+        const dans = (y) => fam.conjoints(y).filter((k) => groupe.includes(k))
+        const bout = groupe.slice().sort((a, b) => dans(a).length - dans(b).length || rang.get(a) - rang.get(b))[0]
+        const chaine = [bout], mis = new Set([bout])
+        while (chaine.length < groupe.length) {
+          const suite = dans(chaine[chaine.length - 1]).find((k) => !mis.has(k)) || groupe.find((k) => !mis.has(k))
+          chaine.push(suite); mis.add(suite)
+        }
+        if (chaine.length === 2 && fam.P.get(chaine[1])?.genre === 'homme' && fam.P.get(chaine[0])?.genre !== 'homme') chaine.reverse()
+        liste.push({ membres: chaine, x: 0 })
+      }
+      foyers.set(g, liste)
+    }
+    const X = new Map()
+    const poser = (f) => f.membres.forEach((m, i) => X.set(m, f.x - largeur(f) / 2 + (i + 0.5) * W))
+    const tasser = (liste, voulu) => {
+      const dec = [], cible = []
+      let cumul = 0
+      liste.forEach((f, i) => { const d = cumul + largeur(f) / 2; dec.push(d); cible.push(voulu[i] - d); cumul += largeur(f) + ECART })
+      const blocs = []
+      for (const v of cible) {
+        blocs.push({ s: v, n: 1 })
+        while (blocs.length > 1 && blocs[blocs.length - 2].s / blocs[blocs.length - 2].n > blocs[blocs.length - 1].s / blocs[blocs.length - 1].n) {
+          const b = blocs.pop(), a = blocs[blocs.length - 1]; a.s += b.s; a.n += b.n
+        }
+      }
+      let i = 0
+      for (const b of blocs) for (let k = 0; k < b.n; k++, i++) liste[i].x = b.s / b.n + dec[i]
+      liste.forEach(poser)
+    }
+    for (const g of gs) { const l = foyers.get(g); tasser(l, l.map(() => 0)) }
+    const moyenne = (f, voisins) => {
+      let s = 0, n = 0
+      for (const m of f.membres) for (const q of voisins(m)) if (X.has(q) && !f.membres.includes(q)) { const w = sang.has(m) ? 4 : 1; s += w * X.get(q); n += w }
+      return n ? s / n : null
+    }
+    const cout = () => {
+      let t = 0
+      for (const e of ids) { const ps = fam.parents(e).filter((q) => X.has(q)); if (ps.length) t += Math.abs(ps.reduce((a, q) => a + X.get(q), 0) / ps.length - X.get(e)) }
+      const xs = ids.map((x) => X.get(x))
+      return t + 0.6 * (Math.max(...xs) - Math.min(...xs))
+    }
+    let meilleur = { t: Infinity, X: null }
+    for (let passe = 0; passe < 30; passe++) {
+      const descend = passe % 2 === 0
+      for (const g of descend ? gs : [...gs].reverse()) {
+        const l = foyers.get(g)
+        const voulu = l.map((f) => moyenne(f, descend ? fam.parents : fam.enfants)
+          ?? (moyenne(f, fam.parents) === null && moyenne(f, fam.enfants) === null ? moyenne(f, fam.fratrie) : null) ?? f.x)
+        const idx = l.map((_, i) => i).sort((a, b) => voulu[a] - voulu[b] || l[a].x - l[b].x)
+        const triee = idx.map((i) => l[i])
+        foyers.set(g, triee)
+        tasser(triee, idx.map((i) => voulu[i]))
+      }
+      if (!descend) { const t = cout(); if (t < meilleur.t - 1) meilleur = { t, X: new Map(X) } }
+    }
+    return meilleur
+  }
+
+  const sansParents = ids.filter((x) => !fam.parents(x).length)
+  const parAge = sansParents.slice().sort((a, b) => gen.get(a) - gen.get(b))
+  const essais = [
+    parAge,
+    parAge.slice().reverse(),
+    [...parAge.filter((x) => ancetres.has(x)), ...parAge.filter((x) => !ancetres.has(x))],
+    [...parAge.filter((x) => !ancetres.has(x)), ...parAge.filter((x) => ancetres.has(x))],
+  ]
+  let mieux = null
+  for (const r of essais) { const m = essai(r); if (!mieux || m.t < mieux.t) mieux = m }
+  // couloirs vides de haut en bas (deux parties de l'arbre sans lien entre elles) : ramenés à une carte de large
+  const X = mieux.X, tries = ids.slice().sort((a, b) => X.get(a) - X.get(b))
+  let decal = 0, bord = -Infinity
+  for (const x of tries) {
+    const g = X.get(x) - W / 2
+    if (bord > -Infinity && g - bord > W) decal += g - bord - W
+    bord = Math.max(bord, X.get(x) + W / 2)
+    X.set(x, X.get(x) - decal)
+  }
+  return { ids, gen, X, W, H }
+}
