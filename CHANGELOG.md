@@ -1,5 +1,9 @@
 # Journal des versions
 
+## 0.26.2 — 27 novembre 2026 (« Lien avec… » dessiné sur le cylindre en Vie 3D)
+
+- **Vie 3D : le chemin se dessine sur le cylindre** (demande de Julien, 27/11/2026) au lieu du schéma à plat : « Lien avec… » passe la vue en « Tout l'arbre », allume le chemin (branches et personnes, le reste en retrait), tourne le cylindre pour mettre le chemin face à l'écran et arrête la rotation lente tant que le chemin est allumé. Lien « Le voir dans l'arbre à plat ». Le schéma reste pour l'éventail. Test d'écran complété. Jamais essayé sur la vraie installation.
+
 ## 0.26.1 — 27 novembre 2026 (réglages de l'arbre cachables)
 
 - **Arbre : cacher les réglages de la vue** (demande de Julien, 27/11/2026, sur iPhone) : toucher le titre « Arbre · L'arbre de … » replie les boutons (Vie 3D / Éventail / Arbre, Lien avec…, Liste, Proches / Tout l'arbre, Revenir à…) ; le chevron les remontre. Choix gardé sur l'appareil (`sillage-arbre-replie`). Test d'écran du propriétaire complété. Jamais essayé sur la vraie installation.

@@ -60,7 +60,9 @@
 
   // 0.23.1 : un chemin que la vue ne peut pas montrer en entier (éventail, arbre de vie) s'affiche en schéma
   // de parenté, de la personne au centre jusqu'à la personne cherchée
-  const schema = $derived(!!cible && vue !== 'complet')
+  // 0.26.2 : en Vie 3D, le chemin s'allume sur le cylindre de « Tout l'arbre » (demande de Julien) ; le schéma ne sert
+  // plus qu'à l'éventail
+  const schema = $derived(!!cible && vue === 'eventail')
   const plat = $derived(VUES.find((v) => v.cle === vue)?.plat || schema)
   const titre = $derived(invite ? 'Votre arbre de famille' : `L'arbre de ${nomDe(parId.get(arbre.depart))}`)
   const lien = $derived(choisie ? parente(ix, reference, choisie.id) : '')
@@ -116,7 +118,7 @@
     if (moteur.sorte === 'plat') dessines = schema && ch
       ? moteur.m.dessiner('chemin', centre, sur, false, { ch, lienDe: (id) => parente(ix, centre, id) })
       : moteur.m.dessiner(schema ? 'complet' : vue, centre, sur, garderCadre)
-    else dessines = moteur.m.montrer(centre, sur, tout)
+    else dessines = moteur.m.montrer(centre, sur, tout || !!sur)
   }
   function surChoix3d(id, quoi) {
     if (quoi === 'perdu') { perdu = true; return }
@@ -250,7 +252,7 @@
     <div class="outils">
       <div class="verre bascule"><button type="button" aria-pressed={panneau === 'lien'} onclick={() => ouvrirPanneau('lien')}>Lien avec…</button></div>
       <div class="verre bascule"><button type="button" aria-pressed={panneau === 'liste'} onclick={() => ouvrirPanneau('liste')}>Liste</button></div>
-      {#if vue === 'vie' && !schema}
+      {#if vue === 'vie' && !cible}
         <div class="verre vues" role="group" aria-label="Personnes montrées">
           <button type="button" aria-pressed={!tout} onclick={() => etendue(false)}>Proches</button>
           <button type="button" aria-pressed={tout} onclick={() => etendue(true)}>Tout l'arbre</button>
@@ -308,7 +310,9 @@
           {#each resume.etapes as e, i}<li>{#if i}<span class="fleche" aria-hidden="true">→</span>{/if}{e}</li>{/each}
         </ol>
       {/if}
-      {#if schema}
+      {#if vue === 'vie'}
+        <p class="discret petit">Chemin allumé sur tout l'arbre. <button type="button" class="lien-texte" onclick={voirComplet}>Le voir dans l'arbre à plat</button></p>
+      {:else if schema}
         <p class="discret petit">Schéma du chemin. <button type="button" class="lien-texte" onclick={voirComplet}>Le voir dans l'arbre complet</button>
           · <button type="button" class="lien-texte" onclick={effacerLien}>Revenir à la vue</button></p>
       {/if}

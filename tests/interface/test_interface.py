@@ -428,6 +428,16 @@ def test_022_arbre_du_proprietaire(page):
     resultat.get_by_role("button", name="Revenir à la vue").click()
     assert page.locator(".resultat").count() == 0
     assert page.locator("svg.plan .personne").count() > 2                             # l'éventail revient
+    # 0.26.2 : en Vie 3D, le chemin s'allume sur le cylindre de « Tout l'arbre » (pas de schéma)
+    page.get_by_role("button", name="Vie 3D", exact=True).click()
+    page.locator(".arbre canvas").wait_for()
+    page.get_by_role("button", name="Lien avec…").click()
+    page.locator(".panneau").get_by_role("button", name=re.compile("^Léa MARCHAND")).click()
+    resultat.get_by_text("Chemin allumé sur tout l'arbre", exact=False).wait_for()
+    assert page.get_by_role("button", name="Proches").count() == 0
+    assert page.locator(".arbre canvas").count() == 1
+    page.keyboard.press("Escape")                                                     # efface le lien
+    page.get_by_role("button", name="Proches").wait_for()
     page.keyboard.press("Escape")                                                     # ferme l'arbre
     assert page.get_by_role("dialog").count() == 0
     sans_debordement(page)

@@ -188,7 +188,9 @@ export function creerVie(conteneur, fam, { lienDe = () => '', surChoix = () => {
     pts.userData.seve = seve; deco.add(pts)
   }
 
-  let centre = null, toutAvant = false
+  let centre = null, toutAvant = false, tourner = null
+  // l'angle `vers` (à 2π près) le plus proche de `de`, pour tourner par le plus court
+  const proche = (de, vers) => vers + Math.round((de - vers) / (2 * Math.PI)) * 2 * Math.PI
   function montrer(c, chemin = null, tout = false) {
     const nouveauCentre = c !== centre || tout !== toutAvant
     centre = c; surligne = chemin; toutAvant = tout
@@ -206,6 +208,12 @@ export function creerVie(conteneur, fam, { lienDe = () => '', surChoix = () => {
         ? { pos: new THREE.Vector3(0, 7, Rc + (portrait ? 46 : 30)), regard: new THREE.Vector3(0, 1, Rc * 0.45), t0: performance.now(), de: camera.position.clone(), deR: controls.target.clone() }
         : { pos: new THREE.Vector3(0, 9, R * (portrait ? 2.9 : 1.7) + 6), regard: new THREE.Vector3(0, 4, 0), t0: performance.now(), de: camera.position.clone(), deR: controls.target.clone() }
       monde.rotation.y = 0
+    }
+    // 0.26.2 : un chemin allumé est tourné face à l'écran (milieu de ses personnes), et ne tourne plus tout seul
+    if (chemin && chemin.ids.size) {
+      let x = 0, z = 0
+      for (const id of chemin.ids) { const p = disposition.pos.get(id); if (p) { x += p.x; z += p.z } }
+      if (x || z) tourner = { de: monde.rotation.y, vers: proche(monde.rotation.y, Math.atan2(z, x) - Math.PI / 2), t0: performance.now() }
     }
     return new Set(disposition.pos.keys())
   }
@@ -247,7 +255,11 @@ export function creerVie(conteneur, fam, { lienDe = () => '', surChoix = () => {
       }
     })
     if (cible) { const c = Math.min(1, (now - cible.t0) / 1100), ec = 1 - Math.pow(1 - c, 3); camera.position.lerpVectors(cible.de, cible.pos, ec); controls.target.lerpVectors(cible.deR, cible.regard, ec); if (c >= 1) cible = null }
-    if (!reduit && now - repos > 3000) monde.rotation.y += dt * 0.00008
+    if (tourner) {
+      const k = Math.min(1, (now - tourner.t0) / 900), e = 1 - (1 - k) ** 3
+      monde.rotation.y = tourner.de + (tourner.vers - tourner.de) * e
+      if (k >= 1) tourner = null
+    } else if (!reduit && !surligne && now - repos > 3000) monde.rotation.y += dt * 0.00008
     controls.update()
     renderer.render(scene, camera)
     anim = requestAnimationFrame(boucle)
