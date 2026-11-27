@@ -16,6 +16,8 @@
   let chemin = $state(null)
   let erreur = $state('')
   let lecture = $state(false)
+  let verification = $state(false)          // 0.25 : le sillage préparé est affiché, Sillage relit les photos en fond
+  let misAJour = $state(false)
   let tout = $state(false)
   let ouverte = $state(null)          // clé de l'étape ouverte
   let masquees = $state(false)        // montrer aussi les étapes masquées
@@ -85,9 +87,21 @@
   async function lire(frais = false) {
     lecture = true
     erreur = ''
+    misAJour = false
     try { chemin = await api.get(`/api/chemin/${id}${frais ? '?frais=true' : ''}`) }
     catch (err) { if (err.statut === 401) ondeconnecte?.(); else erreur = err.message }
     lecture = false
+    if (chemin?.pret && !frais) verifier()
+  }
+  // 0.25 : sillage préparé d'avance → affiché tout de suite, puis Sillage vérifie les photos et refait l'écran si besoin
+  async function verifier() {
+    const pour = id
+    verification = true
+    try {
+      const r = await api.get(`/api/chemin/${pour}/verifier`)
+      if (pour === id && !r.pareil) { chemin = r; misAJour = true }
+    } catch (err) { if (err.statut === 401) ondeconnecte?.() }      // Immich muet : le sillage préparé reste
+    if (pour === id) verification = false
   }
   onMount(() => { lire(); lireArbre() })
 </script>
@@ -135,6 +149,12 @@
       </Button>
     </div>
   </header>
+
+  {#if verification || misAJour}
+    <p class="-mt-3 mb-4 text-xs text-muted-foreground" role="status">
+      {verification ? 'Vérification des dernières photos…' : 'Mis à jour avec les dernières photos.'}
+    </p>
+  {/if}
 
   {#if !chemin.etapes}
     <p class="rounded-2xl border bg-card p-5 text-sm text-muted-foreground">Aucune photo datée de cette personne dans Immich pour l'instant.</p>

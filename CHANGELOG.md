@@ -1,5 +1,16 @@
 # Journal des versions
 
+## 0.25.0 — 27 novembre 2026 (sillages préparés d'avance)
+
+- **Les sillages des personnes de carnet sont préparés d'avance** (demande de Julien, 27/11/2026 ; dossier « Sillages préparés d'avance » et conseil du même jour) et gardés dans la base (table `sillage_pret`). Ouvrir un sillage préparé est instantané : rien n'est relu dans Immich.
+- **À l'ouverture**, l'écran demande aussitôt `GET /api/chemin/{p}/verifier` : Sillage relit les photos en fond, compare l'**empreinte** (identifiant, fichier, dates, dossier, archivage, personnes reconnues de chaque photo ; pas `updatedAt`) et le **contexte** (réglages du calcul, repères de Millésime et de Chambre noire pour ses photos, corrections, version de Sillage) ; s'ils ont changé, le sillage est refait, gardé, et l'écran se met à jour (« Mis à jour avec les dernières photos »).
+- **Chaque nuit** (avec les frises, `heure_frises`) : tous les sillages vérifiés ; **le dimanche, tous refaits** (un album renommé ne change pas l'empreinte). Une correction dans Sillage refait le sillage tout de suite ; un réglage du calcul changé les reprend tous en fond.
+- **Au démarrage**, ceux qui manquent sont préparés en fond, une personne à la fois (pause de 0,3 s entre deux).
+- **Une seule file** de préparation, sans doublon ; Immich muet : l'ancien sillage reste affiché et l'erreur est notée ; une personne sortie de carnet perd son sillage gardé (seulement si carnet a répondu).
+- **Réglages › Sillages préparés** : « N sur M prêts », dernier préparé, refaits, erreurs, avancement ; bouton **Préparer les sillages maintenant** (`POST /api/sillages/preparer`, 409 si une préparation tourne). `/health` : `sillages_prets` et la tâche `preparation-sillages`.
+- Les visages nommés d'Immich sans fiche carnet ne sont pas gardés (calcul à l'ouverture comme avant).
+- Tests : `tests/test_sillages_prets.py` (6), test d'écran des Réglages. Jamais essayé sur la vraie installation : la durée de la vérification de nuit sur tout le carnet est inconnue.
+
 ## 0.24.0 — 27 novembre 2026 (Vie 3D d'emblée, « Tout l'arbre », arbre complet revu)
 
 - **Trois vues** (demande de Julien, 27/11/2026) : **Vie 3D**, **Éventail**, **Arbre**. **Sablier** (trop proche de l'arbre) et **Hélice** (illisible) retirés (`lib/arbre/scene.js` supprimé).

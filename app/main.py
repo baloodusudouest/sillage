@@ -30,6 +30,7 @@ chaque nuit (SILLAGE_HEURE_FRISES, 2 h par défaut) avec les photos ajoutées : 
 from __future__ import annotations
 
 import asyncio
+import json
 import hashlib
 import hmac
 import secrets
@@ -38,6 +39,7 @@ import logging
 import re
 import threading
 import time
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from datetime import date, datetime, timedelta
@@ -118,7 +120,8 @@ async def cycle(app: FastAPI):
                 personnes=None, lues={}, albums={}, connues={}, derniere_lecture=None, toutes=None, invites={}, reperes=None,
                 reglages=reglages_, base=Base(cfg.data / "sillage.db"),
                 cache=Cache(cfg.data / "vignettes", reglages_.get("cache_mo")),
-                fond=[], verrous={}, nuit=None, arbre=None, visages_arbre=set(), arbres_invites={})
+                fond=[], verrous={}, nuit=None, arbre=None, visages_arbre=set(), arbres_invites={},
+                verrous_sillages={}, file_sillages=deque(), prep=_prep_vide())
     # 0.17 : clé des identifiants de photos montrés aux invités, tirée une fois et gardée dans la base
     if not ETAT["base"].reglage("cle_photos"):
         ETAT["base"].poser_reglage("cle_photos", secrets.token_hex(32))
@@ -133,6 +136,9 @@ async def cycle(app: FastAPI):
     # 0.18 : santé des tâches de fond (socle 0.9.0) — chaque boucle se déclare, chaque tour est suivi dans /health
     maison.TACHES.declarer(TACHE_NUIT, periode_s=86400, type="reguliere")
     maison.TACHES.declarer(TACHE_PREPARATION, type="demande")
+    maison.TACHES.declarer(TACHE_SILLAGES, type="demande")
+    if cfg.preparer_au_demarrage:                 # 0.25 : les sillages pas encore préparés, tout de suite, en fond
+        _en_fond(_tout_preparer, False, True, "demarrage")
     nuit = asyncio.create_task(_chaque_nuit())
     # 0.18 : copie cohérente de la base chaque nuit (heure de Paris), dans <données>/copies
     copie = asyncio.create_task(maison.planifier_copie(APPLI, [cfg.data / "sillage.db"], cfg.data / "copies",
@@ -175,6 +181,7 @@ def sante(request: Request):
     # 0.18 : + version_socle, taches, copie_base (socle 0.9.0) ; messages d'erreur seulement avec le jeton commun
     # ou une session valide
     return {"ok": True, "version": __version__, "frises_pretes": len(ETAT["base"].preparees()),
+            "sillages_prets": len(ETAT["base"].sillages_prets()),                    # 0.25
             **maison.sante(request, jeton_commun=maison.jetons(), session_ok=ETAT["sessions"].connecte(request.cookies))}
 
 
@@ -368,29 +375,102 @@ def _chemin(personne: str, frais: bool = False, hote: str = "") -> dict:
     return resultat
 
 
-def _calcul_du_chemin(personne: str, fiche: dict, frais: bool = False) -> dict:
-    """0.20 : le calcul du chemin seul (sans l'adresse d'Immich), pour l'écran et pour /externe/personnes/…/etapes."""
+def _lire_photos(personne: str, recentes: bool = False) -> list[dict]:
+    """Les photos de la personne dans Immich (gardées dix minutes en mémoire, 50 personnes au plus). `recentes` : une
+    lecture de moins de dix minutes suffit (après une correction) ; sinon Immich est relu."""
     garde_ = ETAT["lues"].get(personne)
-    if not garde_ or frais or time.monotonic() - garde_[0] > MEMOIRE:
-        if frais:
-            ETAT["albums"].clear()
-            _reperes(frais=True)
-        garde_ = (time.monotonic(), list(ETAT["immich"].photos_de(personne)))
-        with VERROU:
-            lues = ETAT["lues"]
-            lues.pop(personne, None)
-            lues[personne] = garde_                    # M26 : la dernière lue passe en fin de table
-            while len(lues) > LUES_MAX:
-                del lues[next(iter(lues))]             # la plus anciennement lue part
-            ETAT["connues"].update({p["id"]: p.get("checksum") or "" for p in garde_[1] if calcul.visible(p)})
+    if recentes and garde_ and time.monotonic() - garde_[0] < MEMOIRE:
+        return garde_[1]
+    garde_ = (time.monotonic(), list(ETAT["immich"].photos_de(personne)))
+    with VERROU:
+        lues = ETAT["lues"]
+        lues.pop(personne, None)
+        lues[personne] = garde_                    # M26 : la dernière lue passe en fin de table
+        while len(lues) > LUES_MAX:
+            del lues[next(iter(lues))]             # la plus anciennement lue part
+        ETAT["connues"].update({p["id"]: p.get("checksum") or "" for p in garde_[1] if calcul.visible(p)})
+    return garde_[1]
+
+
+def _empreinte(photos: list[dict]) -> str:
+    """0.25 : ce qui, dans les photos lues, change le sillage : la photo, son fichier, ses dates, son dossier et les
+    personnes reconnues dessus. `updatedAt` n'y est pas : Immich le change pour des vignettes ou des visages recalculés."""
+    lignes = sorted("|".join([str(p.get("id")), str(p.get("checksum") or ""), str(p.get("localDateTime") or ""),
+                              str(p.get("fileCreatedAt") or ""), str(p.get("originalPath") or ""),
+                              str(p.get("isArchived") or ""), str(p.get("visibility") or ""),
+                              ",".join(sorted(str(q.get("id")) for q in p.get("people") or []))]) for p in photos)
+    return hashlib.sha256("\n".join(lignes).encode()).hexdigest()
+
+
+def _contexte(personne: str, photos: list[dict]) -> str:
+    """0.25 : le reste de ce qui change le sillage : réglages du calcul, repères de Millésime et de Chambre noire pour
+    ses photos, corrections faites dans Sillage, version de Sillage."""
     estimees, non_datees = _reperes()
-    return calcul.calculer(fiche, garde_[1], _noms_d_albums, _mots(), ETAT["base"].marques(personne), _muets(),
+    ids = {p["id"] for p in photos}
+    corps = {"v": __version__, "mots": list(_mots()), "muets": list(_muets()),
+             "estimees": sorted([i, *estimees[i]] for i in ids & set(estimees)), "non_datees": sorted(ids & non_datees),
+             "marques": ETAT["base"].marques(personne)}
+    return hashlib.sha256(json.dumps(corps, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
+def _calcul_sur(personne: str, fiche: dict, photos: list[dict]) -> dict:
+    estimees, non_datees = _reperes()
+    return calcul.calculer(fiche, photos, _noms_d_albums, _mots(), ETAT["base"].marques(personne), _muets(),
                            estimees=estimees, non_datees=non_datees)
+
+
+def _verrou_sillage(personne: str) -> threading.Lock:
+    with VERROU:
+        return ETAT["verrous_sillages"].setdefault(personne, threading.Lock())
+
+
+def _preparer_sillage(personne: str, fiche: dict, forcer: bool = False, recentes: bool = False) -> tuple[dict, bool]:
+    """0.25 : relit les photos, compare l'empreinte et le contexte au sillage gardé, recalcule et garde s'ils diffèrent
+    (toujours avec `forcer`). Rend (sillage, refait). L'ancien sillage n'est remplacé qu'une fois le nouveau calculé."""
+    with _verrou_sillage(personne):
+        photos = _lire_photos(personne, recentes=recentes)
+        empreinte, contexte = _empreinte(photos), _contexte(personne, photos)
+        deja = ETAT["base"].sillage_pret(personne)
+        if deja and not forcer and deja["empreinte"] == empreinte and deja["contexte"] == contexte and not deja["erreur"]:
+            return deja["contenu"], False
+        contenu = _calcul_sur(personne, fiche, photos)
+        connues = {p["id"]: p.get("checksum") or "" for p in photos if calcul.visible(p)}
+        if fiche.get("carnet"):                    # seules les personnes de carnet sont gardées (choix de Julien)
+            ETAT["base"].garder_sillage(personne, empreinte, contexte, contenu, connues)
+        return contenu, True
+
+
+def _calcul_du_chemin(personne: str, fiche: dict, frais: bool = False) -> dict:
+    """0.20 : le calcul du chemin seul (sans l'adresse d'Immich), pour l'écran et pour /externe/personnes/…/etapes.
+    0.25 : le sillage préparé d'avance est rendu tel quel (l'écran demande ensuite /verifier) ; `frais` relit tout."""
+    if frais:
+        ETAT["albums"].clear()
+        _reperes(frais=True)
+        return _preparer_sillage(personne, fiche, forcer=True)[0]
+    pret = ETAT["base"].sillage_pret(personne) if fiche.get("carnet") else None
+    if pret:
+        ETAT["connues"].update(pret["connues"])            # les corrections marchent sans relire Immich
+        return {**pret["contenu"], "pret": pret["le"]}
+    return _preparer_sillage(personne, fiche, recentes=True)[0]
 
 
 @app.get("/api/chemin/{personne}")
 def chemin(personne: str, request: Request, frais: bool = False):
     return _chemin(personne, frais, request.headers.get("host", ""))
+
+
+@app.get("/api/chemin/{personne}/verifier")
+def verifier(personne: str, request: Request):
+    """0.25 : appelé par l'écran juste après un sillage préparé : relit les photos dans Immich et rend {pareil: true},
+    ou le sillage refait (et gardé) quand les photos ou les réglages ont changé."""
+    fiche = _personnes().get(personne)
+    if not fiche:
+        raise HTTPException(404, "Personne inconnue de Sillage.")
+    contenu, refait = _preparer_sillage(personne, fiche)
+    if not refait:
+        return {"pareil": True}
+    return {**contenu, "immich": adresse_immich(request.headers.get("host", "")), "immich_port": IMMICH_PORT,
+            "mis_a_jour": True}
 
 
 @app.post("/api/chemin/{personne}/marque")
@@ -413,6 +493,8 @@ def marquer(personne: str, request: Request, corps: dict = Body(...)):
                          connues[str(corps["poser"])] if corps.get("poser") else None, valeur)
     # 0.13 : les frises d'invités où paraît cette personne sont refaites avec la correction
     _oublier([i["jeton"] for i in ETAT["base"].invitations() if any(p["id"] == personne for p in i["personnes"])])
+    # 0.25 : le sillage préparé est refait tout de suite (le contexte a changé) avec les photos déjà lues
+    _preparer_sillage(personne, _personnes()[personne], recentes=True)
     return _chemin(personne, hote=request.headers.get("host", ""))
 
 
@@ -649,6 +731,102 @@ def _en_fond(travail, *args) -> None:
     fil.start()
 
 
+# ================================================================ sillages préparés d'avance (0.25)
+def _prep_vide() -> dict:
+    return {"en_cours": False, "faits": 0, "total": 0, "refaits": 0, "erreurs": 0, "derniere_erreur": "",
+            "debut": None, "fin": None, "par": ""}
+
+
+def _tout_preparer(forcer: bool = False, manquants: bool = False, par: str = "bouton") -> int:
+    """Met toutes les personnes de carnet dans la file (seulement celles sans sillage avec `manquants`) ; les sillages
+    des personnes sorties de carnet sont retirés (seulement si carnet a répondu). Rend le nombre mis en file."""
+    try:
+        gens = {i for i, f in _personnes(frais=True).items() if f.get("carnet")}
+    except Exception as exc:                       # Immich muet : on réessaiera
+        log.warning("Préparation des sillages impossible : %s", exc)
+        ETAT["prep"].update(derniere_erreur=str(exc)[:200])
+        return 0
+    if not (ETAT.get("carnet") or {}).get("erreur") and ETAT["cfg"].jeton:
+        ETAT["base"].oublier_sillages(gens)
+    if manquants:
+        gens -= set(ETAT["base"].sillages_prets())
+    return _demander(sorted(gens), forcer, par)
+
+
+def _demander(personnes: list[str], forcer: bool = False, par: str = "") -> int:
+    """Une seule file de préparation : pas de doublon, un seul fil qui la vide, une personne à la fois."""
+    with VERROU:
+        file_ = ETAT["file_sillages"]
+        dans = {p for p, _ in file_}
+        nouveaux = [p for p in personnes if p not in dans]
+        file_.extend((p, forcer) for p in nouveaux)
+        prep = ETAT["prep"]
+        if not prep["en_cours"]:
+            ETAT["prep"] = prep = {**_prep_vide(), "en_cours": True, "debut": base_maintenant(), "par": par}
+            lancer = True
+        else:
+            lancer = False
+        prep["total"] += len(nouveaux)
+    if lancer:
+        _en_fond(_vider_la_file)
+    return len(nouveaux)
+
+
+def base_maintenant() -> str:
+    return datetime.now().astimezone().isoformat(timespec="seconds")
+
+
+def _vider_la_file() -> None:
+    while True:
+        with VERROU:
+            if not ETAT["file_sillages"]:
+                ETAT["prep"].update(en_cours=False, fin=base_maintenant())
+                return
+            personne, forcer = ETAT["file_sillages"].popleft()
+        prep = ETAT["prep"]
+        try:
+            with maison.TACHES.tour(TACHE_SILLAGES):
+                fiche = _personnes().get(personne)
+                if fiche and fiche.get("carnet"):
+                    _, refait = _preparer_sillage(personne, fiche, forcer=forcer)
+                    prep["refaits"] += int(refait)
+        except Exception as exc:                   # l'ancien sillage reste ; la nuit suivante réessaie
+            log.warning("Sillage non préparé : %s", exc)
+            prep["erreurs"] += 1
+            prep["derniere_erreur"] = str(exc)[:200]
+            ETAT["base"].erreur_sillage(personne, str(exc))
+        prep["faits"] += 1
+        time.sleep(PAUSE_SILLAGES)
+
+
+def _etat_sillages() -> dict:
+    """Pour Réglages : combien de personnes de carnet ont leur sillage prêt, et la préparation en cours ou dernière."""
+    prets = ETAT["base"].sillages_prets()
+    try:
+        carnet = {i for i, f in _personnes().items() if f.get("carnet")}
+    except Exception:
+        carnet = set(prets)
+    dates = sorted(v["le"] for k, v in prets.items() if k in carnet)
+    return {"prets": len(set(prets) & carnet), "carnet": len(carnet),
+            "en_erreur": sum(1 for k, v in prets.items() if k in carnet and v["erreur"]),
+            "plus_recent": dates[-1] if dates else None, "preparation": dict(ETAT["prep"])}
+
+
+@app.get("/api/sillages")
+def sillages():
+    return _etat_sillages()
+
+
+@app.post("/api/sillages/preparer")
+def sillages_preparer():
+    """Bouton de Réglages : tous les sillages de carnet refaits, en fond (refusé si une préparation tourne déjà)."""
+    if ETAT["prep"]["en_cours"]:
+        raise HTTPException(409, "Une préparation est déjà en cours.")
+    if not _tout_preparer(True, False, "bouton") and ETAT["prep"]["derniere_erreur"]:
+        raise HTTPException(503, ETAT["prep"]["derniere_erreur"])
+    return {"ok": True}
+
+
 def _rafraichir_tout() -> None:
     """La mise à jour de la nuit : les noms d'albums et les personnes sont relus, chaque frise refaite."""
     ETAT["albums"].clear()
@@ -659,9 +837,13 @@ def _rafraichir_tout() -> None:
     ETAT["arbre"] = None
     _preparer([i["jeton"] for i in ETAT["base"].invitations()])
     ETAT["nuit"] = datetime.now().isoformat(timespec="seconds")
+    # 0.25 : chaque sillage vérifié ; le dimanche, tous refaits (un album renommé ne change pas l'empreinte)
+    _tout_preparer(datetime.now().weekday() == 6, False, "nuit")
 
 
 TACHE_NUIT = "frises-de-nuit"              # 0.18 : nom de la boucle de nuit dans /health (taches)
+TACHE_SILLAGES = "preparation-sillages"    # 0.25 : préparation d'un sillage d'une personne de carnet
+PAUSE_SILLAGES = 0.3                       # 0.25 : secondes entre deux personnes (Immich respire)
 TACHE_PREPARATION = "preparation-frises"   # 0.18 : préparation d'une frise d'invitation (à la demande)
 
 
@@ -751,6 +933,8 @@ def _changer(valeurs: dict) -> list[str]:
         ETAT["reperes"] = None                       # les tags sont relus au prochain chemin
     if set(changes) - {"cache_mo"}:
         _oublier([i["jeton"] for i in ETAT["base"].invitations()])   # les frises des chambres sont refaites
+    if {"mots", "dossiers_muets", "tag_estimee", "tag_non_datee"} & set(changes):
+        _en_fond(_tout_preparer, False, False, "reglages")          # 0.25 : les sillages préparés suivent, en fond
     return changes
 
 

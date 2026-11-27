@@ -48,6 +48,7 @@ class Config:
     heure_frises: int = 2            # 0.13 : heure de la mise à jour nocturne des frises des invités (heure du conteneur, TZ)
     chambre_noire_url: str = CHAMBRE_NOIRE_URL
     attente_connexion: bool = True   # délai anti-essais ; coupé dans les tests
+    preparer_au_demarrage: bool = False   # 0.25 : sillages manquants préparés au démarrage (vrai en service, coupé dans les tests)
 
 
 def charger() -> Config:
@@ -67,4 +68,5 @@ def charger() -> Config:
         jeton=maison.jeton_a_envoyer(),                                    # 0.16 : MAISON_JETON seul
         jeton_ha=os.environ.get("SILLAGE_JETON_HA", "").strip(),          # propre à Home Assistant : jamais le jeton commun
         heure_frises=int(h) % 24 if (h := (os.environ.get("SILLAGE_HEURE_FRISES") or "2").strip()).isdigit() else 2,
+        preparer_au_demarrage=True,
     )

@@ -45,6 +45,28 @@
     enCours = false
   }
 
+  // ---------------------------------------------------------------- sillages préparés (0.25)
+  let etatSillages = $state(null)
+  let messageSillages = $state('')
+  let minuteur = null
+  const quand = (iso) => {
+    const d = new Date(iso), auj = new Date()
+    const h = d.toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })
+    return d.toDateString() === auj.toDateString() ? 'aujourd\'hui à ' + h : 'le ' + d.toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' }) + ' à ' + h
+  }
+  async function lireSillages() {
+    try { etatSillages = await api.get('/api/sillages') } catch { etatSillages = null }
+    clearTimeout(minuteur)
+    if (etatSillages?.preparation?.en_cours) minuteur = setTimeout(lireSillages, 2000)
+  }
+  async function preparerSillages() {
+    messageSillages = ''
+    try { await api.post('/api/sillages/preparer', {}); messageSillages = 'Préparation lancée, en fond.' }
+    catch (err) { messageSillages = err.statut === 409 ? err.message : 'Sillage ne répond pas.' }
+    setTimeout(lireSillages, 500)
+  }
+  onMount(() => { lireSillages(); return () => clearTimeout(minuteur) })
+
   // ---------------------------------------------------------------- hôtes (0.7)
   // Dans la frise de plusieurs invités, chacun garde ses photos seul ou avec eux.
   let hotes = $state([])
@@ -145,6 +167,27 @@
       {#if messageChemin}<p class="text-sm text-muted-foreground" role="status">{messageChemin}</p>{/if}
     </div>
   </form>
+</section>
+
+<section class="mt-4 rounded-2xl border bg-card p-5" aria-labelledby="titre-sillages">
+  <h2 id="titre-sillages" class="text-lg font-semibold">Sillages préparés</h2>
+  <p class="mt-1 text-sm text-muted-foreground">Le sillage de chaque personne de carnet est préparé d'avance et vérifié chaque nuit : il s'ouvre sans attendre.</p>
+  {#if etatSillages}
+    {@const p = etatSillages.preparation}
+    <p class="mt-3 text-sm" role="status">
+      {etatSillages.prets} sur {etatSillages.carnet} prêt{etatSillages.prets > 1 ? 's' : ''}{etatSillages.plus_recent ? ' · dernier préparé ' + quand(etatSillages.plus_recent) : ''}{p.fin && !p.en_cours ? ' · ' + p.refaits + ' refait' + (p.refaits > 1 ? 's' : '') + ' à la dernière préparation' : ''}
+    </p>
+    {#if p.en_cours}
+      <p class="mt-1 text-sm text-muted-foreground">En cours : {p.faits} sur {p.total}…</p>
+    {/if}
+    {#if etatSillages.en_erreur || p.derniere_erreur}
+      <p class="mt-1 text-sm text-destructive">{etatSillages.en_erreur ? etatSillages.en_erreur + ' sillage' + (etatSillages.en_erreur > 1 ? 's' : '') + ' pas à jour (l\'ancien reste affiché). ' : ''}{p.derniere_erreur}</p>
+    {/if}
+  {/if}
+  <div class="mt-4">
+    <Button onclick={preparerSillages} disabled={etatSillages?.preparation?.en_cours}>Préparer les sillages maintenant</Button>
+  </div>
+  {#if messageSillages}<p class="mt-2 text-sm text-muted-foreground" role="status">{messageSillages}</p>{/if}
 </section>
 
 <section class="mt-4 rounded-2xl border bg-card p-5" aria-labelledby="titre-hotes">

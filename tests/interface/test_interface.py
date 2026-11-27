@@ -232,6 +232,12 @@ def test_connexion_et_reglages(page):
     page.get_by_role("button", name="Garder").click()
     page.get_by_text("Gardé. Les chemins").wait_for()
     sans_debordement(page)
+    # 0.25 : sillages préparés d'avance (le carnet de démonstration n'a aucune fiche)
+    bloc = page.locator("section", has=page.get_by_role("heading", name="Sillages préparés"))
+    bloc.get_by_text("0 sur 0 prêt").wait_for()
+    bloc.get_by_role("button", name="Préparer les sillages maintenant").click()
+    bloc.get_by_text("Préparation lancée, en fond.").wait_for()
+    sans_debordement(page)
 
 
 def test_016_restaurer_les_reglages(page):

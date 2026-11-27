@@ -55,6 +55,12 @@ class Base:
             CREATE TABLE IF NOT EXISTS proposition (id TEXT PRIMARY KEY, jeton TEXT NOT NULL, corps TEXT NOT NULL,
                                                     le TEXT NOT NULL, envoyee_le TEXT, etat TEXT NOT NULL DEFAULT 'attente');
             CREATE INDEX IF NOT EXISTS proposition_jeton ON proposition (jeton);
+            -- 0.25 : sillages des personnes de carnet préparés d'avance. `empreinte` : les photos lues dans Immich ;
+            -- `contexte` : réglages, repères, marques et version du calcul ; `connues` : photo → empreinte du fichier
+            -- (les corrections marchent sans relire Immich) ; `erreur` : dernier essai manqué (l'ancien sillage reste).
+            CREATE TABLE IF NOT EXISTS sillage_pret (personne TEXT PRIMARY KEY, empreinte TEXT NOT NULL,
+                                                     contexte TEXT NOT NULL, contenu TEXT NOT NULL,
+                                                     connues TEXT NOT NULL, le TEXT NOT NULL, erreur TEXT);
         """)
         # 0.6 : date d'arrivée, pour l'onglet « Chambres » (bases de la 0.5 : colonne ajoutée)
         if "du" not in [l["name"] for l in self._c.execute("PRAGMA table_info(invites)")]:
@@ -132,6 +138,42 @@ class Base:
         with self._verrou, self._c:
             self._c.execute("DELETE FROM invites WHERE chambre = ?", (chambre,))
             self._c.execute("DELETE FROM frises WHERE jeton NOT IN (SELECT jeton FROM invites)")
+
+    # ------------------------------------------------------------ 0.25 : sillages préparés d'avance
+    def sillage_pret(self, personne: str) -> dict | None:
+        """Le sillage préparé d'une personne : {empreinte, contexte, contenu, connues, le, erreur}."""
+        with self._verrou:
+            l = self._c.execute("SELECT * FROM sillage_pret WHERE personne = ?", (personne,)).fetchone()
+        if not l:
+            return None
+        return {"empreinte": l["empreinte"], "contexte": l["contexte"], "contenu": json.loads(l["contenu"]),
+                "connues": json.loads(l["connues"]), "le": l["le"], "erreur": l["erreur"]}
+
+    def garder_sillage(self, personne: str, empreinte: str, contexte: str, contenu: dict, connues: dict) -> str:
+        le = maintenant_tz()
+        with self._verrou, self._c:
+            self._c.execute("INSERT OR REPLACE INTO sillage_pret VALUES (?, ?, ?, ?, ?, ?, NULL)",
+                            (personne, empreinte, contexte, json.dumps(contenu, ensure_ascii=False),
+                             json.dumps(connues), le))
+        return le
+
+    def erreur_sillage(self, personne: str, erreur: str) -> None:
+        """Un essai manqué : le sillage d'avant reste, l'erreur est notée."""
+        with self._verrou, self._c:
+            self._c.execute("UPDATE sillage_pret SET erreur = ? WHERE personne = ?", (erreur[:300], personne))
+
+    def sillages_prets(self) -> dict[str, dict]:
+        """personne → {le, erreur}."""
+        with self._verrou:
+            return {l["personne"]: {"le": l["le"], "erreur": l["erreur"]}
+                    for l in self._c.execute("SELECT personne, le, erreur FROM sillage_pret")}
+
+    def oublier_sillages(self, garder: set[str]) -> int:
+        """Retire les sillages des personnes qui ne sont plus dans carnet ; rend le nombre retiré."""
+        with self._verrou, self._c:
+            partis = [l["personne"] for l in self._c.execute("SELECT personne FROM sillage_pret") if l["personne"] not in garder]
+            self._c.executemany("DELETE FROM sillage_pret WHERE personne = ?", [(p,) for p in partis])
+        return len(partis)
 
     # ------------------------------------------------------------ 0.13 : frises des invités préparées d'avance
     def frise(self, jeton: str) -> tuple[dict, str] | None:
